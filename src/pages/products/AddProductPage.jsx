@@ -60,6 +60,13 @@ export function AddProductPage() {
   const [gstRate, setGstRate] = useState('18% GST');
   const [is24HourDelivery, setIs24HourDelivery] = useState(false);
 
+  // Physical Dimensions & Weight (Optional)
+  const [thicknessMm, setThicknessMm] = useState('');
+  const [lengthMm, setLengthMm] = useState('');
+  const [widthMm, setWidthMm] = useState('');
+  const [heightMm, setHeightMm] = useState('');
+  const [weightKg, setWeightKg] = useState('');
+
   // Bulk Pricing Tiers State
   const [bulkPricingTiers, setBulkPricingTiers] = useState([]);
 
@@ -317,6 +324,11 @@ export function AddProductPage() {
       gstRate: parsedGst,
       gst: parsedGst,
       is24HourDelivery: Boolean(is24HourDelivery),
+      thicknessMm: thicknessMm !== '' ? Number(thicknessMm) : undefined,
+      lengthMm: lengthMm !== '' ? Number(lengthMm) : undefined,
+      widthMm: widthMm !== '' ? Number(widthMm) : undefined,
+      heightMm: heightMm !== '' ? Number(heightMm) : undefined,
+      weightKg: weightKg !== '' ? Number(weightKg) : undefined,
       images: images,
       imageUrl: images[0] || null,
       bulkPricingTiers: cleanBulkPricingTiers,
@@ -686,6 +698,63 @@ export function AddProductPage() {
                 onChange={(e) => setIs24HourDelivery(e.target.checked)}
                 className="w-4 h-4 text-blue-600 rounded cursor-pointer"
               />
+            </div>
+          </div>
+
+          {/* ========================================================================= */}
+          {/* MOBILE CARD: PHYSICAL DIMENSIONS & FREIGHT SPECS (OPTIONAL)               */}
+          {/* ========================================================================= */}
+          <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-2xs space-y-3">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-700 pb-2 border-b border-slate-100">
+              <Package className="w-4 h-4 text-amber-600" />
+              <span>Physical Dimensions & Weight <span className="text-slate-400 font-normal lowercase">(optional)</span></span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">Thickness (mm)</label>
+                <input
+                  type="number"
+                  placeholder="e.g. 18"
+                  value={thicknessMm}
+                  onChange={(e) => setThicknessMm(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">Weight (kg)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="e.g. 32.5"
+                  value={weightKg}
+                  onChange={(e) => setWeightKg(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">Length (mm)</label>
+                <input
+                  type="number"
+                  placeholder="e.g. 2440"
+                  value={lengthMm}
+                  onChange={(e) => setLengthMm(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">Width (mm)</label>
+                <input
+                  type="number"
+                  placeholder="e.g. 1220"
+                  value={widthMm}
+                  onChange={(e) => setWidthMm(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800"
+                />
+              </div>
             </div>
           </div>
 
@@ -1299,6 +1368,81 @@ export function AddProductPage() {
                     <span>24-Hour Express Delivery</span>
                   </div>
                 </label>
+              </div>
+            </div>
+          </div>
+
+          {/* ========================================================================= */}
+          {/* CARD: PHYSICAL DIMENSIONS & FREIGHT SPECS (OPTIONAL)                      */}
+          {/* ========================================================================= */}
+          <div className="bg-white rounded-xl border border-slate-200/90 p-5 shadow-2xs space-y-3.5">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+              <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-amber-700">
+                <Package className="w-4 h-4 text-amber-500" />
+                <span>Physical Dimensions & Weight <span className="text-slate-400 font-normal lowercase">(optional - for vehicle freight matching)</span></span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">Thickness (mm)</label>
+                <input
+                  type="number"
+                  placeholder="e.g. 18"
+                  value={thicknessMm}
+                  onChange={(e) => setThicknessMm(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">Sheet goods, tiles, glass</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">Length (mm)</label>
+                <input
+                  type="number"
+                  placeholder="e.g. 2440"
+                  value={lengthMm}
+                  onChange={(e) => setLengthMm(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">Total length in mm</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">Width (mm)</label>
+                <input
+                  type="number"
+                  placeholder="e.g. 1220"
+                  value={widthMm}
+                  onChange={(e) => setWidthMm(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">Total width in mm</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">Height (mm)</label>
+                <input
+                  type="number"
+                  placeholder="e.g. 100"
+                  value={heightMm}
+                  onChange={(e) => setHeightMm(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">3D boxed goods</p>
+              </div>
+
+              <div className="col-span-2 sm:col-span-1">
+                <label className="block text-xs font-bold text-slate-800 mb-1">Weight (kg)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="e.g. 32.5"
+                  value={weightKg}
+                  onChange={(e) => setWeightKg(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">Gross weight in kg</p>
               </div>
             </div>
           </div>

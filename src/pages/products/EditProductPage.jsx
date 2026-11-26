@@ -440,6 +440,61 @@ export function EditProductPage() {
           />
         </div>
 
+        {/* Section: Physical Dimensions & Freight */}
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs space-y-4">
+          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <Package className="w-4 h-4 text-amber-600" /> Physical Dimensions & Freight (Optional)
+          </h3>
+
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+            <Input
+              label="Thickness (mm)"
+              type="number"
+              placeholder="e.g. 18"
+              value={formData.thicknessMm ?? ''}
+              onChange={(e) => handleFieldChange('thicknessMm', e.target.value ? Number(e.target.value) : null)}
+              helperText="For sheet goods / tiles"
+            />
+
+            <Input
+              label="Length (mm)"
+              type="number"
+              placeholder="e.g. 2440"
+              value={formData.lengthMm ?? ''}
+              onChange={(e) => handleFieldChange('lengthMm', e.target.value ? Number(e.target.value) : null)}
+              helperText="Total length"
+            />
+
+            <Input
+              label="Width (mm)"
+              type="number"
+              placeholder="e.g. 1220"
+              value={formData.widthMm ?? ''}
+              onChange={(e) => handleFieldChange('widthMm', e.target.value ? Number(e.target.value) : null)}
+              helperText="Total width"
+            />
+
+            <Input
+              label="Height (mm)"
+              type="number"
+              placeholder="e.g. 100"
+              value={formData.heightMm ?? ''}
+              onChange={(e) => handleFieldChange('heightMm', e.target.value ? Number(e.target.value) : null)}
+              helperText="Total height"
+            />
+
+            <Input
+              label="Weight (kg)"
+              type="number"
+              step="0.01"
+              placeholder="e.g. 32.5"
+              value={formData.weightKg ?? ''}
+              onChange={(e) => handleFieldChange('weightKg', e.target.value ? Number(e.target.value) : null)}
+              helperText="Gross weight"
+            />
+          </div>
+        </div>
+
         {/* Section 5: Inventory */}
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs space-y-4">
           <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">

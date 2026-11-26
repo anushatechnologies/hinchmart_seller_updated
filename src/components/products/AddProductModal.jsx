@@ -47,6 +47,13 @@ export function AddProductModal({ isOpen, onClose, initialData = {} }) {
   const [gstRate, setGstRate] = useState(initialData.gstRate || '18% GST');
   const [is24HourDelivery, setIs24HourDelivery] = useState(Boolean(initialData.is24HourDelivery));
 
+  // Physical Dimensions & Weight (Optional - for freight & logistics)
+  const [thicknessMm, setThicknessMm] = useState(initialData.thicknessMm ?? '');
+  const [lengthMm, setLengthMm] = useState(initialData.lengthMm ?? '');
+  const [widthMm, setWidthMm] = useState(initialData.widthMm ?? '');
+  const [heightMm, setHeightMm] = useState(initialData.heightMm ?? '');
+  const [weightKg, setWeightKg] = useState(initialData.weightKg ?? '');
+
   // Imagery State
   const [activeImageTab, setActiveImageTab] = useState('upload'); // 'upload' | 'url'
   const [images, setImages] = useState(initialData.images || []);
@@ -108,6 +115,11 @@ export function AddProductModal({ isOpen, onClose, initialData = {} }) {
       if (initialData.specifications) setSpecifications(initialData.specifications);
       if (initialData.price) setPrice(initialData.price);
       if (initialData.mrp) setMrp(initialData.mrp);
+      if (initialData.thicknessMm !== undefined) setThicknessMm(initialData.thicknessMm);
+      if (initialData.lengthMm !== undefined) setLengthMm(initialData.lengthMm);
+      if (initialData.widthMm !== undefined) setWidthMm(initialData.widthMm);
+      if (initialData.heightMm !== undefined) setHeightMm(initialData.heightMm);
+      if (initialData.weightKg !== undefined) setWeightKg(initialData.weightKg);
     }
   }, [isOpen, initialData]);
 
@@ -223,6 +235,11 @@ export function AddProductModal({ isOpen, onClose, initialData = {} }) {
       gstRate: parsedGst,
       gst: parsedGst,
       is24HourDelivery: Boolean(is24HourDelivery),
+      thicknessMm: thicknessMm !== '' && thicknessMm !== undefined ? Number(thicknessMm) : undefined,
+      lengthMm: lengthMm !== '' && lengthMm !== undefined ? Number(lengthMm) : undefined,
+      widthMm: widthMm !== '' && widthMm !== undefined ? Number(widthMm) : undefined,
+      heightMm: heightMm !== '' && heightMm !== undefined ? Number(heightMm) : undefined,
+      weightKg: weightKg !== '' && weightKg !== undefined ? Number(weightKg) : undefined,
       images: images,
       imageUrl: images[0] || null,
       description: description.trim(),
@@ -420,6 +437,91 @@ export function AddProductModal({ isOpen, onClose, initialData = {} }) {
                   <span>Enable 24-Hour Express Logistics Delivery for this product</span>
                 </div>
               </label>
+            </div>
+          </div>
+
+          {/* ========================================================================= */}
+          {/* CARD: PHYSICAL DIMENSIONS & LOGISTICS (OPTIONAL)                          */}
+          {/* ========================================================================= */}
+          <div className="bg-white rounded-xl border border-slate-200/90 p-5 shadow-2xs space-y-3.5">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+              <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-amber-700">
+                <Package className="w-4 h-4 text-amber-500" />
+                <span>Physical Dimensions & Weight <span className="text-slate-400 font-normal lowercase">(optional - for logistics vehicle capacity matching)</span></span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Thickness (mm)
+                </label>
+                <input
+                  type="number"
+                  placeholder="e.g. 18"
+                  value={thicknessMm}
+                  onChange={(e) => setThicknessMm(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">For sheet goods / tiles</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Length (mm)
+                </label>
+                <input
+                  type="number"
+                  placeholder="e.g. 2440"
+                  value={lengthMm}
+                  onChange={(e) => setLengthMm(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">Total length in mm</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Width (mm)
+                </label>
+                <input
+                  type="number"
+                  placeholder="e.g. 1220"
+                  value={widthMm}
+                  onChange={(e) => setWidthMm(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">Total width in mm</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Height (mm)
+                </label>
+                <input
+                  type="number"
+                  placeholder="e.g. 100"
+                  value={heightMm}
+                  onChange={(e) => setHeightMm(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">For 3D boxed items</p>
+              </div>
+
+              <div className="col-span-2 sm:col-span-1">
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Weight (kg)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="e.g. 32.5"
+                  value={weightKg}
+                  onChange={(e) => setWeightKg(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">Gross weight in kg</p>
+              </div>
             </div>
           </div>
 

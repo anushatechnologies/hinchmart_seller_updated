@@ -96,6 +96,13 @@ export function normalizeSellerProduct(p) {
   }
   const specifications = typeof rawSpecs === 'object' && rawSpecs !== null ? rawSpecs : {};
 
+  const thicknessMm = p.thicknessMm !== undefined && p.thicknessMm !== null ? Number(p.thicknessMm) : (p.thickness_mm !== undefined && p.thickness_mm !== null ? Number(p.thickness_mm) : (p.thickness !== undefined && p.thickness !== null ? Number(p.thickness) : null));
+  const lengthMm = p.lengthMm !== undefined && p.lengthMm !== null ? Number(p.lengthMm) : (p.length_mm !== undefined && p.length_mm !== null ? Number(p.length_mm) : (p.length !== undefined && p.length !== null ? Number(p.length) : null));
+  const widthMm = p.widthMm !== undefined && p.widthMm !== null ? Number(p.widthMm) : (p.width_mm !== undefined && p.width_mm !== null ? Number(p.width_mm) : (p.width !== undefined && p.width !== null ? Number(p.width) : null));
+  const heightMm = p.heightMm !== undefined && p.heightMm !== null ? Number(p.heightMm) : (p.height_mm !== undefined && p.height_mm !== null ? Number(p.height_mm) : (p.height !== undefined && p.height !== null ? Number(p.height) : null));
+  const weightKg = p.weightKg !== undefined && p.weightKg !== null ? Number(p.weightKg) : (p.weight_kg !== undefined && p.weight_kg !== null ? Number(p.weight_kg) : (p.weight !== undefined && p.weight !== null ? Number(p.weight) : null));
+  const weightGrams = p.weightGrams !== undefined && p.weightGrams !== null ? Number(p.weightGrams) : (p.weight_grams !== undefined && p.weight_grams !== null ? Number(p.weight_grams) : null);
+
   return {
     ...p,
     id: productId,
@@ -119,6 +126,17 @@ export function normalizeSellerProduct(p) {
     stock: stockQty,
     stockQty,
     is24HourDelivery: Boolean(p.is24HourDelivery),
+    thicknessMm,
+    thickness: thicknessMm,
+    lengthMm,
+    length: lengthMm,
+    widthMm,
+    width: widthMm,
+    heightMm,
+    height: heightMm,
+    weightKg,
+    weight: weightKg,
+    weightGrams,
     active: p.active !== undefined ? Boolean(p.active) : status === 'APPROVED',
     status, // PENDING | APPROVED | REJECTED | INACTIVE | DELETED_BY_ADMIN
     approvalStatus: status === 'APPROVED' ? 'APPROVED' : (status === 'REJECTED' ? 'REJECTED' : (status === 'INACTIVE' ? 'INACTIVE' : (status === 'DELETED_BY_ADMIN' ? 'DELETED_BY_ADMIN' : 'PENDING'))),
@@ -1034,6 +1052,12 @@ export const sellerProductService = {
       gstRate: parsedGst,
       gst: parsedGst,
       is24HourDelivery: Boolean(productData.is24HourDelivery),
+      thicknessMm: productData.thicknessMm !== undefined && productData.thicknessMm !== '' && productData.thicknessMm !== null ? Number(productData.thicknessMm) : undefined,
+      lengthMm: productData.lengthMm !== undefined && productData.lengthMm !== '' && productData.lengthMm !== null ? Number(productData.lengthMm) : undefined,
+      widthMm: productData.widthMm !== undefined && productData.widthMm !== '' && productData.widthMm !== null ? Number(productData.widthMm) : undefined,
+      heightMm: productData.heightMm !== undefined && productData.heightMm !== '' && productData.heightMm !== null ? Number(productData.heightMm) : undefined,
+      weightKg: productData.weightKg !== undefined && productData.weightKg !== '' && productData.weightKg !== null ? Number(productData.weightKg) : undefined,
+      weightGrams: productData.weightGrams !== undefined && productData.weightGrams !== '' && productData.weightGrams !== null ? Number(productData.weightGrams) : undefined,
       imageUrl: images[0] || productData.imageUrl || null,
       images,
       bulkPricingTiers: (productData.bulkPricingTiers || []).map((t) => ({
@@ -1254,6 +1278,12 @@ export const sellerProductService = {
       gstRate: parsedGst,
       gst: parsedGst,
       is24HourDelivery: Boolean(updates.is24HourDelivery ?? localProd.is24HourDelivery),
+      thicknessMm: updates.thicknessMm !== undefined && updates.thicknessMm !== '' && updates.thicknessMm !== null ? Number(updates.thicknessMm) : (localProd.thicknessMm ?? undefined),
+      lengthMm: updates.lengthMm !== undefined && updates.lengthMm !== '' && updates.lengthMm !== null ? Number(updates.lengthMm) : (localProd.lengthMm ?? undefined),
+      widthMm: updates.widthMm !== undefined && updates.widthMm !== '' && updates.widthMm !== null ? Number(updates.widthMm) : (localProd.widthMm ?? undefined),
+      heightMm: updates.heightMm !== undefined && updates.heightMm !== '' && updates.heightMm !== null ? Number(updates.heightMm) : (localProd.heightMm ?? undefined),
+      weightKg: updates.weightKg !== undefined && updates.weightKg !== '' && updates.weightKg !== null ? Number(updates.weightKg) : (localProd.weightKg ?? undefined),
+      weightGrams: updates.weightGrams !== undefined && updates.weightGrams !== '' && updates.weightGrams !== null ? Number(updates.weightGrams) : (localProd.weightGrams ?? undefined),
       imageUrl: images[0] || null,
       images,
       specifications: updates.specifications || localProd.specifications || {},

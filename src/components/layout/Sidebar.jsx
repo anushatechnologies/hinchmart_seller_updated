@@ -253,8 +253,8 @@ export function Sidebar() {
             isExpanded ? 'justify-between' : 'justify-center'
           )}>
             {isExpanded ? (
-              <div className="flex items-center justify-between w-full min-w-0">
-                <div className="flex items-center min-w-0">
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center shrink-0">
                   <BrandLogo
                     size="sidebar"
                     theme="dark"
@@ -264,7 +264,7 @@ export function Sidebar() {
                   />
                 </div>
 
-                <div className="flex items-center shrink-0 ml-1">
+                <div className="flex items-center shrink-0 ml-2">
                   {/* Desktop Collapse Toggle */}
                   <button
                     type="button"

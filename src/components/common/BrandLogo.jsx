@@ -50,7 +50,7 @@ export function BrandLogo({
   const sizeClasses = {
     sm: 'h-7 w-auto max-w-[100px]',
     navbar: 'h-8 sm:h-9 w-auto max-w-[130px]',
-    sidebar: 'h-10 w-auto max-w-[125px]',
+    sidebar: 'h-9 py-0.5 w-auto max-w-[115px]',
     md: 'h-10 sm:h-11 w-auto max-w-[140px]',
     lg: 'h-12 sm:h-14 w-auto max-w-[200px]',
     login: 'h-14 sm:h-16 w-auto max-w-[240px]',
@@ -99,7 +99,7 @@ export function BrandLogo({
         }}
       />
       {showBadge && (
-        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-xs shrink-0">
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-xs shrink-0 whitespace-nowrap">
           {badgeText}
         </span>
       )}
