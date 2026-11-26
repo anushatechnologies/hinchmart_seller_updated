@@ -5,6 +5,84 @@ import { categoryService } from './category.service.js';
 import { INITIAL_PRODUCTS } from '../mock/seedData.js';
 
 /**
+ * Intelligently extracts or parses physical dimensions and weight from specifications
+ * or explicit dimension inputs. Supports formats like:
+ * - "18 × 18 × 6 cm", "2440 x 1220 x 18 mm", "2.4 x 1.2 m", "18mm"
+ * - "1.3 kg", "500 g", "1.22", "32.5 kg"
+ */
+export function extractDimensionsFromSpecs(specs = {}, explicitDims = {}) {
+  let length = explicitDims.lengthMm ?? explicitDims.length_mm ?? explicitDims.length ?? explicitDims.packedLengthMm ?? explicitDims.packed_length_mm;
+  let width = explicitDims.widthMm ?? explicitDims.width_mm ?? explicitDims.width ?? explicitDims.packedWidthMm ?? explicitDims.packed_width_mm;
+  let height = explicitDims.heightMm ?? explicitDims.height_mm ?? explicitDims.height ?? explicitDims.packedHeightMm ?? explicitDims.packed_height_mm;
+  let thickness = explicitDims.thicknessMm ?? explicitDims.thickness_mm ?? explicitDims.thickness;
+  let weight = explicitDims.weightKg ?? explicitDims.weight_kg ?? explicitDims.weight ?? explicitDims.packedWeightKg ?? explicitDims.packed_weight_kg;
+
+  const s = specs || {};
+
+  // Extract weight if not explicitly provided
+  if (weight === undefined || weight === null || weight === '') {
+    const rawWeight = s['Weight'] || s['weight'] || s['Gross Weight'] || s['gross_weight'] || s['GrossWeight'] || s['Net Weight'] || s['net_weight'];
+    if (rawWeight !== undefined && rawWeight !== null) {
+      const match = String(rawWeight).match(/([\d.]+)\s*(kg|g|gm|grams)?/i);
+      if (match) {
+        let val = parseFloat(match[1]);
+        const unit = (match[2] || '').toLowerCase();
+        if (unit === 'g' || unit === 'gm' || unit === 'grams') {
+          val = val / 1000;
+        }
+        if (!isNaN(val) && val > 0) weight = val;
+      }
+    }
+  }
+
+  // Extract thickness if not explicitly provided
+  if (thickness === undefined || thickness === null || thickness === '') {
+    const rawThick = s['Thickness'] || s['thickness'] || s['Thickness (mm)'] || s['thickness_mm'];
+    if (rawThick !== undefined && rawThick !== null) {
+      const match = String(rawThick).match(/([\d.]+)\s*(mm|cm)?/i);
+      if (match) {
+        let val = parseFloat(match[1]);
+        const unit = (match[2] || '').toLowerCase();
+        if (unit === 'cm') val = val * 10;
+        if (!isNaN(val) && val > 0) thickness = Math.round(val);
+      }
+    }
+  }
+
+  // Extract dimensions (length, width, height) if not explicitly provided
+  if (
+    (length === undefined || length === null || length === '') &&
+    (width === undefined || width === null || width === '')
+  ) {
+    const rawDim = s['Dimensions'] || s['dimensions'] || s['Size'] || s['size'] || s['Dimension'] || s['dimension'];
+    if (rawDim !== undefined && rawDim !== null) {
+      const dimStr = String(rawDim);
+      const isCm = /cm/i.test(dimStr);
+      const isM = /\bm\b|meter/i.test(dimStr) && !/mm/i.test(dimStr);
+      const multiplier = isCm ? 10 : (isM ? 1000 : 1);
+
+      const parts = dimStr.split(/[×xX*]/).map((p) => p.replace(/[^\d.]/g, '').trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        const l = parseFloat(parts[0]);
+        const w = parseFloat(parts[1]);
+        const h = parts[2] ? parseFloat(parts[2]) : undefined;
+        if (!isNaN(l) && l > 0) length = Math.round(l * multiplier);
+        if (!isNaN(w) && w > 0) width = Math.round(w * multiplier);
+        if (h !== undefined && !isNaN(h) && h > 0) height = Math.round(h * multiplier);
+      }
+    }
+  }
+
+  return {
+    length: length !== undefined && length !== '' && length !== null && !isNaN(Number(length)) ? Number(length) : null,
+    width: width !== undefined && width !== '' && width !== null && !isNaN(Number(width)) ? Number(width) : null,
+    height: height !== undefined && height !== '' && height !== null && !isNaN(Number(height)) ? Number(height) : null,
+    thickness: thickness !== undefined && thickness !== '' && thickness !== null && !isNaN(Number(thickness)) ? Number(thickness) : null,
+    weight: weight !== undefined && weight !== '' && weight !== null && !isNaN(Number(weight)) ? Number(weight) : null,
+  };
+}
+
+/**
  * Normalizes a seller-owned product item
  */
 export function normalizeSellerProduct(p) {
@@ -96,12 +174,26 @@ export function normalizeSellerProduct(p) {
   }
   const specifications = typeof rawSpecs === 'object' && rawSpecs !== null ? rawSpecs : {};
 
-  const thicknessMm = p.thicknessMm !== undefined && p.thicknessMm !== null ? Number(p.thicknessMm) : (p.thickness_mm !== undefined && p.thickness_mm !== null ? Number(p.thickness_mm) : (p.thickness !== undefined && p.thickness !== null ? Number(p.thickness) : null));
-  const lengthMm = p.lengthMm !== undefined && p.lengthMm !== null ? Number(p.lengthMm) : (p.length_mm !== undefined && p.length_mm !== null ? Number(p.length_mm) : (p.length !== undefined && p.length !== null ? Number(p.length) : null));
-  const widthMm = p.widthMm !== undefined && p.widthMm !== null ? Number(p.widthMm) : (p.width_mm !== undefined && p.width_mm !== null ? Number(p.width_mm) : (p.width !== undefined && p.width !== null ? Number(p.width) : null));
-  const heightMm = p.heightMm !== undefined && p.heightMm !== null ? Number(p.heightMm) : (p.height_mm !== undefined && p.height_mm !== null ? Number(p.height_mm) : (p.height !== undefined && p.height !== null ? Number(p.height) : null));
-  const weightKg = p.weightKg !== undefined && p.weightKg !== null ? Number(p.weightKg) : (p.weight_kg !== undefined && p.weight_kg !== null ? Number(p.weight_kg) : (p.weight !== undefined && p.weight !== null ? Number(p.weight) : null));
-  const weightGrams = p.weightGrams !== undefined && p.weightGrams !== null ? Number(p.weightGrams) : (p.weight_grams !== undefined && p.weight_grams !== null ? Number(p.weight_grams) : null);
+  const rawThickness = p.thicknessMm ?? p.thickness_mm ?? p.thickness ?? null;
+  const rawLength = p.lengthMm ?? p.length_mm ?? p.length ?? p.packed_length_mm ?? p.packedLengthMm ?? null;
+  const rawWidth = p.widthMm ?? p.width_mm ?? p.width ?? p.packed_width_mm ?? p.packedWidthMm ?? null;
+  const rawHeight = p.heightMm ?? p.height_mm ?? p.height ?? p.packed_height_mm ?? p.packedHeightMm ?? null;
+  const rawWeight = p.weightKg ?? p.weight_kg ?? p.weight ?? p.packed_weight_kg ?? p.packedWeightKg ?? null;
+
+  const resolvedDims = extractDimensionsFromSpecs(specifications, {
+    lengthMm: rawLength,
+    widthMm: rawWidth,
+    heightMm: rawHeight,
+    thicknessMm: rawThickness,
+    weightKg: rawWeight,
+  });
+
+  const finalLengthMm = resolvedDims.length;
+  const finalWidthMm = resolvedDims.width;
+  const finalHeightMm = resolvedDims.height;
+  const finalThicknessMm = resolvedDims.thickness;
+  const finalWeightKg = resolvedDims.weight;
+  const finalWeightGrams = p.weightGrams ?? p.weight_grams ?? (finalWeightKg ? Math.round(finalWeightKg * 1000) : null);
 
   return {
     ...p,
@@ -126,17 +218,33 @@ export function normalizeSellerProduct(p) {
     stock: stockQty,
     stockQty,
     is24HourDelivery: Boolean(p.is24HourDelivery),
-    thicknessMm,
-    thickness: thicknessMm,
-    lengthMm,
-    length: lengthMm,
-    widthMm,
-    width: widthMm,
-    heightMm,
-    height: heightMm,
-    weightKg,
-    weight: weightKg,
-    weightGrams,
+    thicknessMm: finalThicknessMm,
+    thickness_mm: finalThicknessMm,
+    thickness: finalThicknessMm,
+    lengthMm: finalLengthMm,
+    length_mm: finalLengthMm,
+    length: finalLengthMm,
+    widthMm: finalWidthMm,
+    width_mm: finalWidthMm,
+    width: finalWidthMm,
+    heightMm: finalHeightMm,
+    height_mm: finalHeightMm,
+    height: finalHeightMm,
+    weightKg: finalWeightKg,
+    weight_kg: finalWeightKg,
+    weight: finalWeightKg,
+    weightGrams: finalWeightGrams,
+    weight_grams: finalWeightGrams,
+    packedLengthMm: finalLengthMm,
+    packed_length_mm: finalLengthMm,
+    packedWidthMm: finalWidthMm,
+    packed_width_mm: finalWidthMm,
+    packedHeightMm: finalHeightMm,
+    packed_height_mm: finalHeightMm,
+    packedWeightKg: finalWeightKg,
+    packed_weight_kg: finalWeightKg,
+    packedDimensionsVerified: Boolean(p.packed_dimensions_verified ?? p.packedDimensionsVerified ?? (finalLengthMm && finalWidthMm)),
+    packed_dimensions_verified: p.packed_dimensions_verified ?? (finalLengthMm && finalWidthMm ? 1 : 0),
     active: p.active !== undefined ? Boolean(p.active) : status === 'APPROVED',
     status, // PENDING | APPROVED | REJECTED | INACTIVE | DELETED_BY_ADMIN
     approvalStatus: status === 'APPROVED' ? 'APPROVED' : (status === 'REJECTED' ? 'REJECTED' : (status === 'INACTIVE' ? 'INACTIVE' : (status === 'DELETED_BY_ADMIN' ? 'DELETED_BY_ADMIN' : 'PENDING'))),
@@ -1027,6 +1135,29 @@ export const sellerProductService = {
       ? Number(brandId)
       : (Number.isInteger(Number(productData.brandId)) && Number(productData.brandId) > 0 ? Number(productData.brandId) : 1);
 
+    const resolvedDims = extractDimensionsFromSpecs(productData.specifications, {
+      lengthMm: productData.lengthMm ?? productData.length_mm ?? productData.length ?? productData.packedLengthMm ?? productData.packed_length_mm,
+      widthMm: productData.widthMm ?? productData.width_mm ?? productData.width ?? productData.packedWidthMm ?? productData.packed_width_mm,
+      heightMm: productData.heightMm ?? productData.height_mm ?? productData.height ?? productData.packedHeightMm ?? productData.packed_height_mm,
+      thicknessMm: productData.thicknessMm ?? productData.thickness_mm ?? productData.thickness,
+      weightKg: productData.weightKg ?? productData.weight_kg ?? productData.weight ?? productData.packedWeightKg ?? productData.packed_weight_kg,
+    });
+
+    const parsedLength = resolvedDims.length !== null ? resolvedDims.length : undefined;
+    const parsedWidth = resolvedDims.width !== null ? resolvedDims.width : undefined;
+    const parsedHeight = resolvedDims.height !== null ? resolvedDims.height : undefined;
+    const parsedThickness = resolvedDims.thickness !== null ? resolvedDims.thickness : undefined;
+    const parsedWeightKg = resolvedDims.weight !== null ? resolvedDims.weight : undefined;
+    const parsedWeightGrams = parsedWeightKg ? Math.round(parsedWeightKg * 1000) : (productData.weightGrams ? Number(productData.weightGrams) : undefined);
+
+    const cleanSpecs = { ...(productData.specifications || {}) };
+    if (parsedLength && parsedWidth && !cleanSpecs['Dimensions'] && !cleanSpecs['dimensions']) {
+      cleanSpecs['Dimensions'] = `${parsedLength} × ${parsedWidth}${parsedHeight ? ` × ${parsedHeight}` : ''} mm`;
+    }
+    if (parsedWeightKg && !cleanSpecs['Weight'] && !cleanSpecs['weight']) {
+      cleanSpecs['Weight'] = `${parsedWeightKg} kg`;
+    }
+
     const payload = {
       name: title,
       title,
@@ -1052,12 +1183,37 @@ export const sellerProductService = {
       gstRate: parsedGst,
       gst: parsedGst,
       is24HourDelivery: Boolean(productData.is24HourDelivery),
-      thicknessMm: productData.thicknessMm !== undefined && productData.thicknessMm !== '' && productData.thicknessMm !== null ? Number(productData.thicknessMm) : undefined,
-      lengthMm: productData.lengthMm !== undefined && productData.lengthMm !== '' && productData.lengthMm !== null ? Number(productData.lengthMm) : undefined,
-      widthMm: productData.widthMm !== undefined && productData.widthMm !== '' && productData.widthMm !== null ? Number(productData.widthMm) : undefined,
-      heightMm: productData.heightMm !== undefined && productData.heightMm !== '' && productData.heightMm !== null ? Number(productData.heightMm) : undefined,
-      weightKg: productData.weightKg !== undefined && productData.weightKg !== '' && productData.weightKg !== null ? Number(productData.weightKg) : undefined,
-      weightGrams: productData.weightGrams !== undefined && productData.weightGrams !== '' && productData.weightGrams !== null ? Number(productData.weightGrams) : undefined,
+      is_24hour_delivery: Boolean(productData.is24HourDelivery),
+      is_24_hour_delivery: Boolean(productData.is24HourDelivery),
+      // Physical measurements & dimensions in mm & kg (all aliases for Spring Boot & MySQL compatibility)
+      thicknessMm: parsedThickness,
+      thickness_mm: parsedThickness,
+      thickness: parsedThickness,
+      lengthMm: parsedLength,
+      length_mm: parsedLength,
+      length: parsedLength,
+      widthMm: parsedWidth,
+      width_mm: parsedWidth,
+      width: parsedWidth,
+      heightMm: parsedHeight,
+      height_mm: parsedHeight,
+      height: parsedHeight,
+      weightKg: parsedWeightKg,
+      weight_kg: parsedWeightKg,
+      weight: parsedWeightKg,
+      weightGrams: parsedWeightGrams,
+      weight_grams: parsedWeightGrams,
+      // Packed dimensions for vehicle matching
+      packedLengthMm: parsedLength,
+      packed_length_mm: parsedLength,
+      packedWidthMm: parsedWidth,
+      packed_width_mm: parsedWidth,
+      packedHeightMm: parsedHeight,
+      packed_height_mm: parsedHeight,
+      packedWeightKg: parsedWeightKg,
+      packed_weight_kg: parsedWeightKg,
+      packedDimensionsVerified: parsedLength && parsedWidth ? 1 : undefined,
+      packed_dimensions_verified: parsedLength && parsedWidth ? 1 : undefined,
       imageUrl: images[0] || productData.imageUrl || null,
       images,
       bulkPricingTiers: (productData.bulkPricingTiers || []).map((t) => ({
@@ -1066,7 +1222,7 @@ export const sellerProductService = {
         price: Number(t.price ?? t.pricePerUnit ?? 0),
         discountPercentage: Number(t.discountPercentage ?? t.discount ?? 0),
       })),
-      specifications: productData.specifications || {},
+      specifications: cleanSpecs,
       active: false,
       status: 'PENDING',
       approvalStatus: 'PENDING',
@@ -1250,6 +1406,29 @@ export const sellerProductService = {
     const finalStatus = isResubmission ? 'PENDING' : (updates.status || localProd.status || 'PENDING');
     const finalApprovalStatus = isResubmission ? 'PENDING' : (updates.approvalStatus || localProd.approvalStatus || 'PENDING');
 
+    const resolvedDims = extractDimensionsFromSpecs(updates.specifications || localProd.specifications, {
+      lengthMm: updates.lengthMm ?? updates.length_mm ?? updates.length ?? updates.packedLengthMm ?? updates.packed_length_mm ?? localProd.lengthMm ?? localProd.length_mm ?? localProd.packed_length_mm,
+      widthMm: updates.widthMm ?? updates.width_mm ?? updates.width ?? updates.packedWidthMm ?? updates.packed_width_mm ?? localProd.widthMm ?? localProd.width_mm ?? localProd.packed_width_mm,
+      heightMm: updates.heightMm ?? updates.height_mm ?? updates.height ?? updates.packedHeightMm ?? updates.packed_height_mm ?? localProd.heightMm ?? localProd.height_mm ?? localProd.packed_height_mm,
+      thicknessMm: updates.thicknessMm ?? updates.thickness_mm ?? updates.thickness ?? localProd.thicknessMm ?? localProd.thickness_mm,
+      weightKg: updates.weightKg ?? updates.weight_kg ?? updates.weight ?? updates.packedWeightKg ?? updates.packed_weight_kg ?? localProd.weightKg ?? localProd.weight_kg ?? localProd.packed_weight_kg,
+    });
+
+    const parsedLength = resolvedDims.length !== null ? resolvedDims.length : undefined;
+    const parsedWidth = resolvedDims.width !== null ? resolvedDims.width : undefined;
+    const parsedHeight = resolvedDims.height !== null ? resolvedDims.height : undefined;
+    const parsedThickness = resolvedDims.thickness !== null ? resolvedDims.thickness : undefined;
+    const parsedWeightKg = resolvedDims.weight !== null ? resolvedDims.weight : undefined;
+    const parsedWeightGrams = parsedWeightKg ? Math.round(parsedWeightKg * 1000) : (updates.weightGrams ? Number(updates.weightGrams) : (localProd.weightGrams ?? undefined));
+
+    const cleanSpecs = { ...(localProd.specifications || {}), ...(updates.specifications || {}) };
+    if (parsedLength && parsedWidth && !cleanSpecs['Dimensions'] && !cleanSpecs['dimensions']) {
+      cleanSpecs['Dimensions'] = `${parsedLength} × ${parsedWidth}${parsedHeight ? ` × ${parsedHeight}` : ''} mm`;
+    }
+    if (parsedWeightKg && !cleanSpecs['Weight'] && !cleanSpecs['weight']) {
+      cleanSpecs['Weight'] = `${parsedWeightKg} kg`;
+    }
+
     const payload = {
       ...localProd,
       ...updates,
@@ -1278,15 +1457,40 @@ export const sellerProductService = {
       gstRate: parsedGst,
       gst: parsedGst,
       is24HourDelivery: Boolean(updates.is24HourDelivery ?? localProd.is24HourDelivery),
-      thicknessMm: updates.thicknessMm !== undefined && updates.thicknessMm !== '' && updates.thicknessMm !== null ? Number(updates.thicknessMm) : (localProd.thicknessMm ?? undefined),
-      lengthMm: updates.lengthMm !== undefined && updates.lengthMm !== '' && updates.lengthMm !== null ? Number(updates.lengthMm) : (localProd.lengthMm ?? undefined),
-      widthMm: updates.widthMm !== undefined && updates.widthMm !== '' && updates.widthMm !== null ? Number(updates.widthMm) : (localProd.widthMm ?? undefined),
-      heightMm: updates.heightMm !== undefined && updates.heightMm !== '' && updates.heightMm !== null ? Number(updates.heightMm) : (localProd.heightMm ?? undefined),
-      weightKg: updates.weightKg !== undefined && updates.weightKg !== '' && updates.weightKg !== null ? Number(updates.weightKg) : (localProd.weightKg ?? undefined),
-      weightGrams: updates.weightGrams !== undefined && updates.weightGrams !== '' && updates.weightGrams !== null ? Number(updates.weightGrams) : (localProd.weightGrams ?? undefined),
+      is_24hour_delivery: Boolean(updates.is24HourDelivery ?? localProd.is24HourDelivery),
+      is_24_hour_delivery: Boolean(updates.is24HourDelivery ?? localProd.is24HourDelivery),
+      // Physical dimensions & measurements in mm & kg (both camelCase and snake_case for 100% MySQL/Spring compatibility)
+      thicknessMm: parsedThickness,
+      thickness_mm: parsedThickness,
+      thickness: parsedThickness,
+      lengthMm: parsedLength,
+      length_mm: parsedLength,
+      length: parsedLength,
+      widthMm: parsedWidth,
+      width_mm: parsedWidth,
+      width: parsedWidth,
+      heightMm: parsedHeight,
+      height_mm: parsedHeight,
+      height: parsedHeight,
+      weightKg: parsedWeightKg,
+      weight_kg: parsedWeightKg,
+      weight: parsedWeightKg,
+      weightGrams: parsedWeightGrams,
+      weight_grams: parsedWeightGrams,
+      // Packed dimensions for logistics vehicle allocation
+      packedLengthMm: parsedLength,
+      packed_length_mm: parsedLength,
+      packedWidthMm: parsedWidth,
+      packed_width_mm: parsedWidth,
+      packedHeightMm: parsedHeight,
+      packed_height_mm: parsedHeight,
+      packedWeightKg: parsedWeightKg,
+      packed_weight_kg: parsedWeightKg,
+      packedDimensionsVerified: parsedLength && parsedWidth ? 1 : undefined,
+      packed_dimensions_verified: parsedLength && parsedWidth ? 1 : undefined,
       imageUrl: images[0] || null,
       images,
-      specifications: updates.specifications || localProd.specifications || {},
+      specifications: cleanSpecs,
       bulkPricingTiers: updates.bulkPricingTiers || localProd.bulkPricingTiers || [],
       active: isResubmission ? false : Boolean(updates.active !== undefined ? updates.active : localProd.active),
       status: finalStatus,
