@@ -196,19 +196,11 @@ export function AddProductPage() {
           }
         } catch (err) {
           console.warn('S3 upload notice:', err?.message);
-          // Fallback to compressed data URL
+          // Fallback to compressed data URL (< 75 KB)
           try {
-            const compressed = await compressImageFile(file, { maxDim: 1200, quality: 0.85 });
+            const compressed = await compressImageFile(file, { maxDim: 800, quality: 0.75 });
             if (compressed) {
               setImages((prev) => [...prev, compressed]);
-            } else {
-              const reader = new FileReader();
-              reader.onload = (event) => {
-                if (event.target?.result) {
-                  setImages((prev) => [...prev, event.target.result]);
-                }
-              };
-              reader.readAsDataURL(file);
             }
           } catch (_) {}
         }

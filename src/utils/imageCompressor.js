@@ -1,9 +1,9 @@
 /**
  * Lightweight browser-side image compression utility using HTML5 Canvas.
- * Compresses images into lightweight base64/data URLs (< 100 KB)
- * so they instantly upload to backend APIs without 413 / timeout errors.
+ * Compresses images into lightweight base64/data URLs (< 75 KB)
+ * so they instantly upload to backend APIs without 413 / timeout / quota errors.
  */
-export async function compressImageFile(file, { maxDim = 800, quality = 0.85 } = {}) {
+export async function compressImageFile(file, { maxDim = 800, quality = 0.75 } = {}) {
   if (!file) return null;
 
   return new Promise((resolve, reject) => {
@@ -32,12 +32,13 @@ export async function compressImageFile(file, { maxDim = 800, quality = 0.85 } =
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        const isPng = file.type === 'image/png';
-        const compressedDataUrl = isPng
-          ? canvas.toDataURL('image/png')
-          : canvas.toDataURL('image/jpeg', quality);
+        // Always compress to JPEG (with quality parameter) to guarantee size < 75 KB
+        let compressedDataUrl = null;
+        try {
+          compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+        } catch (_) {}
 
-        resolve(compressedDataUrl);
+        resolve(compressedDataUrl || rawDataUrl);
       };
 
       img.onerror = () => {

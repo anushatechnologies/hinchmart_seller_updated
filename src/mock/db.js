@@ -31,35 +31,138 @@ const DB_KEYS = {
 
 const memoryStorage = {};
 
-// Helper for local storage reading
+// Helper to sanitize or strip massive base64 image strings (> 25KB) before storing into localStorage
+function stripLargeBase64ForStorage(obj, seen = new WeakSet()) {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (seen.has(obj)) return obj;
+  seen.add(obj);
+
+  if (Array.isArray(obj)) {
+    return obj.map((item) => stripLargeBase64ForStorage(item, seen));
+  }
+
+  const copy = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === 'string' && v.startsWith('data:image/') && v.length > 25000) {
+      // Large base64 data URL - replace with placeholder in localStorage to prevent QuotaExceededError
+      // Full data is safely retained in memoryStorage for live rendering
+      copy[k] = '/placeholder-product.png';
+    } else if (Array.isArray(v)) {
+      copy[k] = v.map((item) => {
+        if (typeof item === 'string' && item.startsWith('data:image/') && item.length > 25000) {
+          return '/placeholder-product.png';
+        }
+        return stripLargeBase64ForStorage(item, seen);
+      });
+    } else if (v && typeof v === 'object') {
+      copy[k] = stripLargeBase64ForStorage(v, seen);
+    } else {
+      copy[k] = v;
+    }
+  }
+  return copy;
+}
+
+// Emergency cleanup when localStorage quota is exceeded or during startup initialization
+export function emergencyStorageCleanup() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    // 1. Remove large duplicate mock keys that consume multiple megabytes
+    const redundantKeys = [
+      'hinchmart_products_data_v5',
+      DB_KEYS.PRODUCTS,
+      DB_KEYS.LABEL_HISTORY,
+      DB_KEYS.NOTIFICATIONS,
+      DB_KEYS.ANALYTICS,
+      DB_KEYS.DOCUMENTS,
+      DB_KEYS.WAREHOUSES,
+      'hinchmart_purged_unowned_v3',
+      'hinchmart_reset_pending_v3',
+    ];
+    redundantKeys.forEach((k) => {
+      try {
+        localStorage.removeItem(k);
+      } catch (_) {}
+    });
+
+    // 2. Scan and clean all hinchmart_seller_products_* keys from huge base64 strings
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('hinchmart_seller_products_')) {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw && (raw.includes('data:image/') || raw.length > 100000)) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              const cleaned = stripLargeBase64ForStorage(parsed);
+              localStorage.setItem(k, JSON.stringify(cleaned));
+            }
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+}
+
+// Helper for local storage reading with memoryStorage fallback
 function getStorage(key, fallback) {
   try {
     if (typeof localStorage === 'undefined') {
       return memoryStorage[key] !== undefined ? memoryStorage[key] : fallback;
     }
     const item = localStorage.getItem(key);
-    return item ? JSON.parse(item) : fallback;
-  } catch (e) {
-    console.error(`Error reading ${key} from storage:`, e);
-    return fallback;
+    if (item) {
+      const parsed = JSON.parse(item);
+      if (memoryStorage[key] === undefined) {
+        memoryStorage[key] = parsed;
+      }
+      return parsed;
+    }
+    return memoryStorage[key] !== undefined ? memoryStorage[key] : fallback;
+  } catch (_) {
+    return memoryStorage[key] !== undefined ? memoryStorage[key] : fallback;
   }
 }
 
-// Helper for local storage writing
+// Helper for local storage writing with QuotaExceededError protection
 function setStorage(key, value) {
+  // Always update memoryStorage first so live runtime never loses data
+  memoryStorage[key] = value;
+
+  if (typeof localStorage === 'undefined') return;
+
   try {
-    if (typeof localStorage === 'undefined') {
-      memoryStorage[key] = value;
-      return;
-    }
-    localStorage.setItem(key, JSON.stringify(value));
+    const safeValue = stripLargeBase64ForStorage(value);
+    localStorage.setItem(key, JSON.stringify(safeValue));
   } catch (e) {
-    console.error(`Error writing ${key} to storage:`, e);
+    const isQuotaError =
+      e?.name === 'QuotaExceededError' ||
+      e?.code === 22 ||
+      e?.code === 1014 ||
+      (typeof e?.message === 'string' && e.message.toLowerCase().includes('quota'));
+
+    if (isQuotaError) {
+      emergencyStorageCleanup();
+      try {
+        const safeValue = stripLargeBase64ForStorage(value);
+        localStorage.setItem(key, JSON.stringify(safeValue));
+      } catch (_) {
+        // If still exceeding quota, data is safely retained in memoryStorage
+      }
+    }
   }
 }
 
 // Initialize database with clean empty state and purge any previous dummy seed data
 export function initDB() {
+  const PURGE_QUOTA_BLOAT_KEY = 'hinchmart_purge_quota_bloat_v2';
+  if (typeof localStorage !== 'undefined' && !localStorage.getItem(PURGE_QUOTA_BLOAT_KEY)) {
+    emergencyStorageCleanup();
+    try {
+      localStorage.setItem(PURGE_QUOTA_BLOAT_KEY, 'true');
+    } catch (_) {}
+  }
+
   const PURGE_DUMMY_VERSION_KEY = 'hinchmart_purged_dummy_v1';
   if (typeof localStorage !== 'undefined') {
     if (!localStorage.getItem(PURGE_DUMMY_VERSION_KEY)) {
@@ -1116,23 +1219,6 @@ export const db = {
     const updated = [newProduct, ...products.filter(p => String(p.id) !== String(newProduct.id) && String(p.productId) !== String(newProduct.productId))];
     setStorage(storageKey, updated);
 
-    // Sync into DB_KEYS.PRODUCTS as well
-    const allExisting = getStorage(DB_KEYS.PRODUCTS, []);
-    const updatedAll = [newProduct, ...allExisting.filter(p => String(p.id) !== String(newProduct.id) && String(p.productId) !== String(newProduct.productId))];
-    setStorage(DB_KEYS.PRODUCTS, updatedAll);
-
-    // Sync into Admin Panel shared local storage key (hinchmart_products_data_v5)
-    if (typeof localStorage !== 'undefined') {
-      try {
-        const adminKey = 'hinchmart_products_data_v5';
-        const adminList = JSON.parse(localStorage.getItem(adminKey) || '[]');
-        if (Array.isArray(adminList)) {
-          const filteredAdmin = adminList.filter(p => String(p.id) !== String(newProduct.id) && String(p.productId) !== String(newProduct.productId));
-          localStorage.setItem(adminKey, JSON.stringify([newProduct, ...filteredAdmin]));
-        }
-      } catch (e) {}
-    }
-
     return newProduct;
   },
 
@@ -1175,57 +1261,6 @@ export const db = {
     }
 
     setStorage(storageKey, updated);
-
-    // 1. Sync into DB_KEYS.PRODUCTS as well
-    const allExisting = getStorage(DB_KEYS.PRODUCTS, []);
-    const updatedAll = [
-      updatedProduct,
-      ...allExisting.filter(p => String(p.id) !== String(productId) && String(p.productId) !== String(productId))
-    ];
-    setStorage(DB_KEYS.PRODUCTS, updatedAll);
-
-    // 2. Sync to all sibling seller keys in case product was saved under a different ID (e.g. 16 vs 9)
-    if (typeof localStorage !== 'undefined') {
-      try {
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && k.startsWith('hinchmart_seller_products_') && k !== storageKey) {
-            const list = JSON.parse(localStorage.getItem(k) || '[]');
-            if (Array.isArray(list)) {
-              const hasProd = list.some(p => String(p.id) === String(productId) || String(p.productId) === String(productId));
-              if (hasProd) {
-                const updatedList = list.map(p => (String(p.id) === String(productId) || String(p.productId) === String(productId)) ? updatedProduct : p);
-                localStorage.setItem(k, JSON.stringify(updatedList));
-              }
-            }
-          }
-        }
-      } catch (_) {}
-    }
-
-    // 3. CRITICAL: Sync into Admin Panel shared local storage key (hinchmart_products_data_v5)
-    // Ensures Admin sees the product as PENDING review with the newly submitted details!
-    if (typeof localStorage !== 'undefined') {
-      try {
-        const adminKey = 'hinchmart_products_data_v5';
-        const adminList = JSON.parse(localStorage.getItem(adminKey) || '[]');
-        if (Array.isArray(adminList)) {
-          const filteredAdmin = adminList.filter(
-            p => String(p.id) !== String(productId) && String(p.productId) !== String(productId)
-          );
-          const adminItem = {
-            ...updatedProduct,
-            status: updatedProduct.status || 'PENDING',
-            approvalStatus: updatedProduct.approvalStatus || 'PENDING',
-            deletedByAdmin: false,
-            active: false,
-            reSubmittedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          };
-          localStorage.setItem(adminKey, JSON.stringify([adminItem, ...filteredAdmin]));
-        }
-      } catch (e) {}
-    }
 
     // 4. Remove from deleted IDs so it is unblocked everywhere
     try {

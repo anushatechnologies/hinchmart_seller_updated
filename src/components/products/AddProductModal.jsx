@@ -20,6 +20,7 @@ import { useCategories, useSubcategories, useBrands } from '../../hooks/useCateg
 import { useProducts } from '../../hooks/useProducts';
 import { useUIStore } from '../../store/uiStore';
 import { uploadService } from '../../services/upload.service';
+import { compressImageFile } from '../../utils/imageCompressor';
 import { DynamicSpecRenderer } from './DynamicSpecRenderer';
 import { Sliders } from 'lucide-react';
 
@@ -135,7 +136,7 @@ export function AddProductModal({ isOpen, onClose, initialData = {} }) {
     }
   };
 
-  // Handle Image Upload directly to AWS S3
+  // Handle Image Upload directly to AWS S3 (with compressed fallback)
   const handleFileUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -148,13 +149,12 @@ export function AddProductModal({ isOpen, onClose, initialData = {} }) {
         }
       } catch (err) {
         console.warn('S3 upload notice in modal:', err?.message);
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          if (event.target?.result) {
-            setImages((prev) => [...prev, event.target.result]);
+        try {
+          const compressed = await compressImageFile(file, { maxDim: 800, quality: 0.75 });
+          if (compressed) {
+            setImages((prev) => [...prev, compressed]);
           }
-        };
-        reader.readAsDataURL(file);
+        } catch (_) {}
       }
     }
   };

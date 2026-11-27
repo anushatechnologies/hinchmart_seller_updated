@@ -144,7 +144,7 @@ export const uploadService = {
     // Fallback: Convert to permanent Base64 Data URL (survives page refresh & localStorage)
     let base64Url = null;
     try {
-      base64Url = await compressImageFile(file, { maxDim: 1200, quality: 0.85 });
+      base64Url = await compressImageFile(file, { maxDim: 800, quality: 0.75 });
     } catch (_) {}
     if (!base64Url) {
       base64Url = await fileToBase64(file);
