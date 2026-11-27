@@ -339,9 +339,10 @@ export const sellerProductService = {
       );
     };
 
-    // 1. Get seller products from local store (guaranteed persistence across refresh)
-    const localList = (db.getSellerProducts(cleanId) || [])
-      .map((p) => normalizeSellerProduct({ ...p, sellerId }));
+    // 1. In mock mode, load local store. In live mode, backend database is authoritative.
+    const localList = USE_MOCK_API
+      ? (db.getSellerProducts(cleanId) || []).map((p) => normalizeSellerProduct({ ...p, sellerId }))
+      : [];
 
     // 2. Fetch live products from backend (both authenticated seller products and public catalog)
     let liveSellerProducts = [];
@@ -501,13 +502,15 @@ export const sellerProductService = {
           if (match.sellerId) {
             p.sellerId = match.sellerId;
           }
-          db.updateSellerProduct(cleanId, p.id, {
-            status: p.status,
-            approvalStatus: p.approvalStatus,
-            active: p.active,
-            id: p.id,
-            productId: p.productId,
-          });
+          if (USE_MOCK_API) {
+            db.updateSellerProduct(cleanId, p.id, {
+              status: p.status,
+              approvalStatus: p.approvalStatus,
+              active: p.active,
+              id: p.id,
+              productId: p.productId,
+            });
+          }
         }
 
         activeLocalList.push(p);
@@ -642,7 +645,9 @@ export const sellerProductService = {
             active: false,
             rejectionReason: p.rejectionReason || 'Product is pending review or requires revision from admin. Click "Edit & Re-submit" to update.',
           };
-          db.updateSellerProduct(cleanId, p.id, flagged);
+          if (USE_MOCK_API) {
+            db.updateSellerProduct(cleanId, p.id, flagged);
+          }
           const key = String(p.id || p.productId || p.sku || p.title).trim().toLowerCase();
           mergedMap.set(key, flagged);
           return;
@@ -692,7 +697,7 @@ export const sellerProductService = {
     });
 
     // Auto-sync un-synced local items in the background
-    if (!USE_MOCK_API) {
+    if (USE_MOCK_API) {
       setTimeout(async () => {
         for (const p of localList) {
           if (typeof p.id === 'string' && (p.id.startsWith('sp_') || p.id.startsWith('prod_') || p.id.length > 10)) {
@@ -1273,17 +1278,26 @@ export const sellerProductService = {
           } else if (typeof rawId === 'string' && !isNaN(parseInt(rawId, 10))) {
             realProdId = parseInt(rawId, 10);
           }
+
+          // Authoritative return directly from backend database (MySQL) - zero localStorage usage!
+          return normalizeSellerProduct({
+            ...payload,
+            ...createdItem,
+            id: realProdId || payload.id,
+            productId: realProdId || payload.productId,
+            status: createdItem.status || 'PENDING',
+            approvalStatus: createdItem.approvalStatus || createdItem.status || 'PENDING',
+            active: Boolean(createdItem.active),
+            isLiveBackend: true,
+          });
+        }
+
+        if (syncErrorMsg) {
+          throw new Error(syncErrorMsg);
         }
       } catch (apiError) {
-        syncErrorMsg = apiError.response?.data?.message || `HTTP ${apiError.response?.status || 'Error'}: ${apiError.message}`;
-        if (apiError.response?.status === 400) {
-          const validationMsg = apiError.response?.data?.message || 'Validation failed on backend. Preserving product locally for review.';
-          console.warn('Backend product creation warning:', validationMsg);
-        } else if (apiError.response?.status === 409) {
-          console.log(`Product "${title}" already exists on backend, tracking locally with PENDING status.`);
-        } else {
-          console.warn('Backend create product notice:', apiError?.response?.data?.message || apiError.message);
-        }
+        const errorDetail = apiError?.response?.data?.message || apiError?.response?.data?.error || apiError.message || syncErrorMsg || 'Failed to create product in backend database';
+        throw new Error(errorDetail);
       }
     }
 
@@ -1545,12 +1559,16 @@ export const sellerProductService = {
         approvalStatus: finalApprovalStatus,
         active: false,
         deletedByAdmin: false,
+        isLiveBackend: true,
       };
 
-      db.updateSellerProduct(sellerId, id, finalSaved);
-      if (realProdId && String(realProdId) !== String(id)) {
-        db.createSellerProduct(sellerId, finalSaved);
+      if (USE_MOCK_API) {
+        db.updateSellerProduct(sellerId, id, finalSaved);
+        if (realProdId && String(realProdId) !== String(id)) {
+          db.createSellerProduct(sellerId, finalSaved);
+        }
       }
+      // Authoritative return directly from backend database (MySQL) - zero localStorage usage!
       return normalizeSellerProduct(finalSaved);
     }
 
@@ -1637,8 +1655,10 @@ export const sellerProductService = {
     }
 
     await delay(50);
-    db.deleteProduct(cleanId);
-    db.deleteSellerProduct(sellerId, cleanId);
+    if (USE_MOCK_API) {
+      db.deleteProduct(cleanId);
+      db.deleteSellerProduct(sellerId, cleanId);
+    }
     return true;
   },
 
