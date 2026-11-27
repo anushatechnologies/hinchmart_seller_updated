@@ -115,6 +115,7 @@ export async function resolveLiveBackendToken(forceRefresh = false) {
           phone: user?.phoneNumber,
         });
         if (backendToken) return backendToken;
+        return fbToken;
       }
 
       return getStoredBackendToken();
