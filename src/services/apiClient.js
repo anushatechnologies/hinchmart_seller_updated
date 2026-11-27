@@ -134,25 +134,67 @@ export function hasValidLiveAuth() {
   return Boolean(getStoredBackendToken() || auth?.currentUser);
 }
 
+// In-memory set of forbidden endpoints for the current session
+const forbiddenEndpoints = new Set();
+
+function normalizePath(url = '') {
+  if (!url || typeof url !== 'string') return '';
+  return url.replace(/^https?:\/\/[^/]+/i, '').split('?')[0].replace(/\/$/, '');
+}
+
 export function isSellerApiForbidden(url = '') {
+  const cleanUrl = normalizePath(url);
+  if (!cleanUrl) return false;
+  if (forbiddenEndpoints.has(cleanUrl)) return true;
+  if (typeof sessionStorage !== 'undefined') {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem('hinch_seller_forbidden') || '[]');
+      if (Array.isArray(stored) && stored.includes(cleanUrl)) {
+        forbiddenEndpoints.add(cleanUrl);
+        return true;
+      }
+    } catch (_) {}
+  }
   return false;
 }
 
-export function markSellerApiForbidden(url = '') {}
+export function markSellerApiForbidden(url = '') {
+  const cleanUrl = normalizePath(url);
+  if (!cleanUrl) return;
+  // Never blacklist auth, sync or login endpoints
+  if (cleanUrl.includes('/api/auth/')) return;
+  forbiddenEndpoints.add(cleanUrl);
+  if (typeof sessionStorage !== 'undefined') {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem('hinch_seller_forbidden') || '[]');
+      if (Array.isArray(stored) && !stored.includes(cleanUrl)) {
+        stored.push(cleanUrl);
+        sessionStorage.setItem('hinch_seller_forbidden', JSON.stringify(stored));
+      }
+    } catch (_) {}
+  }
+}
 
 export function resetSellerApiPermissions() {
+  forbiddenEndpoints.clear();
   if (typeof sessionStorage !== 'undefined') {
     sessionStorage.removeItem('hinch_seller_forbidden');
   }
   if (typeof localStorage !== 'undefined') {
     localStorage.removeItem('hinch_seller_forbidden');
+    localStorage.removeItem('seller_api_allowed');
   }
 }
 
-export function markSellerApiAllowed() {}
+export function markSellerApiAllowed() {
+  resetSellerApiPermissions();
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('seller_api_allowed', 'true');
+  }
+}
 
 export function canAccessSellerApi(url = '') {
-  return true;
+  return !isSellerApiForbidden(url);
 }
 
 export const apiClient = axios.create({
@@ -236,6 +278,11 @@ apiClient.interceptors.response.use(
     const originalRequest = error?.config;
     const status = error?.response?.status;
     const reqUrl = originalRequest?.url || '';
+
+    // Automatically record 403 Forbidden endpoints to avoid repeated failing requests
+    if (status === 403 && reqUrl) {
+      markSellerApiForbidden(reqUrl);
+    }
 
     if (
       status === 401 &&

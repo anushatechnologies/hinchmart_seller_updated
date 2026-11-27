@@ -1,4 +1,4 @@
-import { apiClient, delay, USE_MOCK_API, hasValidLiveAuth, canAccessSellerApi } from './apiClient.js';
+import { apiClient, delay, USE_MOCK_API, hasValidLiveAuth, canAccessSellerApi, markSellerApiForbidden } from './apiClient.js';
 import { db } from '../mock/db.js';
 import { compressImageFile } from '../utils/imageCompressor.js';
 
@@ -670,20 +670,17 @@ export const sellerOnboardingService = {
     const cleanId = normalizeSellerId(sellerId);
     let backendDocs = [];
 
-    if (hasValidLiveAuth() || canAccessSellerApi('/api/seller/documents')) {
+    if (canAccessSellerApi('/api/seller/documents')) {
       try {
-        let response;
-        try {
-          response = await apiClient.get(`/api/seller/onboarding/${cleanId}/documents/vault`);
-        } catch (_) {
-          response = await apiClient.get('/api/seller/documents');
-        }
+        const response = await apiClient.get('/api/seller/documents');
         const rawData = response.data?.data || response.data || [];
         if (Array.isArray(rawData)) {
           backendDocs = rawData.map((d) => normalizeDocumentItem(d));
         }
       } catch (apiError) {
-        // Quiet fallback
+        if (apiError?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/documents');
+        }
       }
     }
 

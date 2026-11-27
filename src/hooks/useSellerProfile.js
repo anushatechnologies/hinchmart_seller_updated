@@ -5,7 +5,9 @@ import { useUIStore } from '../store/uiStore';
 import { useAuthStore } from '../store/authStore';
 import { db } from '../mock/db.js';
 
-export function useSellerProfile(explicitSellerId = null) {
+export function useSellerProfile(explicitSellerId = null, options = {}) {
+  const includeVault = options?.includeVault ?? false;
+  const includeDocuments = options?.includeDocuments ?? false;
   const queryClient = useQueryClient();
   const addToast = useUIStore(state => state.addToast);
   const user = useAuthStore(state => state.user);
@@ -32,13 +34,13 @@ export function useSellerProfile(explicitSellerId = null) {
   const vaultQuery = useQuery({
     queryKey: ['seller', 'vault', activeSellerId],
     queryFn: () => sellerService.getDocumentVault(activeSellerId),
-    enabled: Boolean(activeSellerId),
+    enabled: Boolean(activeSellerId) && Boolean(includeVault),
   });
 
   const documentsQuery = useQuery({
     queryKey: ['seller', 'documents', activeSellerId],
     queryFn: () => sellerService.getDocuments(activeSellerId),
-    enabled: Boolean(activeSellerId),
+    enabled: Boolean(activeSellerId) && Boolean(includeDocuments),
   });
 
   const updateProfileMutation = useMutation({

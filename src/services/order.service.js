@@ -1,5 +1,5 @@
 import { db } from '../mock/db.js';
-import { apiClient, delay, USE_MOCK_API } from './api.js';
+import { apiClient, delay, USE_MOCK_API, canAccessSellerApi, markSellerApiForbidden } from './api.js';
 import { isValidTransition } from '../constants/orderStatus.js';
 
 export function mapToBackendStatus(status) {
@@ -136,24 +136,32 @@ export const orderService = {
         return null;
       };
 
-      // 1. Try dedicated seller endpoint: GET /api/seller/orders
-      try {
-        const response = await apiClient.get('/api/seller/orders', { params: queryParams });
-        const list = extractList(response);
-        if (Array.isArray(list)) {
-          return list.map(normalizeOrder);
-        }
-      } catch (err1) {
-        // Fallback to general order endpoint: GET /api/orders?sellerId=...
+      // 1. Try dedicated seller endpoint if permitted: GET /api/seller/orders
+      if (canAccessSellerApi('/api/seller/orders')) {
         try {
-          const response = await apiClient.get('/api/orders', { params: queryParams });
+          const response = await apiClient.get('/api/seller/orders', { params: queryParams });
           const list = extractList(response);
           if (Array.isArray(list)) {
             return list.map(normalizeOrder);
           }
-        } catch (err2) {
-          // Log notice for dev/monitoring
-          console.warn('Backend orders fetch notice:', err2?.response?.data?.message || err2?.message);
+        } catch (err1) {
+          if (err1?.response?.status === 403) {
+            markSellerApiForbidden('/api/seller/orders');
+          }
+          // Fallback to general order endpoint: GET /api/orders?sellerId=...
+          if (canAccessSellerApi('/api/orders')) {
+            try {
+              const response = await apiClient.get('/api/orders', { params: queryParams });
+              const list = extractList(response);
+              if (Array.isArray(list)) {
+                return list.map(normalizeOrder);
+              }
+            } catch (err2) {
+              if (err2?.response?.status === 403) {
+                markSellerApiForbidden('/api/orders');
+              }
+            }
+          }
         }
       }
     }

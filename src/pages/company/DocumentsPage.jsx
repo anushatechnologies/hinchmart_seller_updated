@@ -98,7 +98,7 @@ export function DocumentsPage() {
     submitForVerification,
     refetchVault,
     isSubmittingVerification,
-  } = useSellerProfile();
+  } = useSellerProfile(null, { includeVault: true, includeDocuments: true });
 
   // Active uploading document key (to show inline loading spinner on the specific card)
   const [activeUploadingKey, setActiveUploadingKey] = useState(null);

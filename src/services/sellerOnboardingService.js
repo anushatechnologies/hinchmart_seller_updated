@@ -1,4 +1,4 @@
-import { apiClient, delay, USE_MOCK_API } from './apiClient.js';
+import { apiClient, delay, USE_MOCK_API, canAccessSellerApi, markSellerApiForbidden } from './apiClient.js';
 import { db } from '../mock/db.js';
 
 export const sellerOnboardingService = {
@@ -206,13 +206,16 @@ export const sellerOnboardingService = {
    */
   async getDocumentVault(sellerId) {
     const activeSellerId = sellerId || 45;
-    if (!USE_MOCK_API) {
+    if (!USE_MOCK_API && canAccessSellerApi('/api/seller/documents')) {
       try {
-        const response = await apiClient.get(`/api/seller/onboarding/${activeSellerId}/vault`);
+        const response = await apiClient.get('/api/seller/documents');
         const resData = response.data?.data || response.data;
         if (resData?.documents) return resData;
+        if (Array.isArray(resData)) return { documents: resData };
       } catch (err) {
-        console.warn('Vault endpoint fallback:', err.message);
+        if (err?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/documents');
+        }
       }
     }
 

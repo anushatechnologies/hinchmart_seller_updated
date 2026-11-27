@@ -17,7 +17,7 @@ import { Button } from '../../components/common/Button';
 import { StatusBadge } from '../../components/common/Badge';
 
 export function VerificationPage() {
-  const { profile, documents, submitForVerification, isUpdating } = useSellerProfile();
+  const { profile, documents, submitForVerification, isUpdating } = useSellerProfile(null, { includeDocuments: true });
 
   const allDocsVerified = documents.length > 0 && documents.every((d) => d.status === 'Verified');
   const hasRejectedDocs = documents.some((d) => d.status === 'Rejected');
