@@ -186,11 +186,7 @@ export function AddProductPage() {
     try {
       for (const file of files) {
         try {
-          const res = await uploadService.uploadFile(
-            file,
-            (progress) => setUploadProgress(progress),
-            'products'
-          );
+          const res = await uploadService.uploadProductImage(file, (progress) => setUploadProgress(progress));
           if (res?.url) {
             setImages((prev) => [...prev, res.url]);
           }

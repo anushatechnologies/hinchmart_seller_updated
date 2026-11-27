@@ -18,24 +18,48 @@ function fileToBase64(file) {
 
 export const uploadService = {
   /**
-   * 4.8 Upload Single Product Image
-   * POST /api/images/products
+   * Phase 1: Upload Single Product Image to AWS S3
+   * Endpoint: POST /api/images/products (multipart/form-data: file)
+   * Fallback: POST /api/images/upload?folder=products
+   * Returns: { success: true, url, imageUrl, fileUrl, imageKey, fileName, fileSize }
    */
   async uploadProductImage(file, onProgress) {
     if (!file) throw new Error('No file provided');
+
+    // 15 MB limit as specified in Spring Boot ImageUploadController
+    const maxSize = 15 * 1024 * 1024;
+    if (file.size > maxSize) {
+      throw new Error(`File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds maximum limit of 15MB.`);
+    }
+
     if (!USE_MOCK_API) {
       try {
         const formData = new FormData();
         formData.append('file', file);
-        const res = await apiClient.post('/api/images/products', formData, {
-          timeout: 20000,
-          onUploadProgress: (e) => {
-            if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));
-          },
-        });
+        formData.append('folder', 'products');
+
+        let res;
+        try {
+          res = await apiClient.post('/api/images/products', formData, {
+            timeout: 30000,
+            onUploadProgress: (e) => {
+              if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));
+            },
+          });
+        } catch (err1) {
+          // Fallback to /api/images/upload?folder=products
+          res = await apiClient.post('/api/images/upload?folder=products', formData, {
+            timeout: 30000,
+            onUploadProgress: (e) => {
+              if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));
+            },
+          });
+        }
+
         const data = res.data?.data || res.data;
-        const url = data?.fileUrl || data?.imageUrl || data?.url;
+        const url = data?.imageUrl || data?.fileUrl || data?.url;
         if (url) {
+          if (onProgress) onProgress(100);
           return {
             success: true,
             fileUrl: url,
@@ -47,15 +71,34 @@ export const uploadService = {
           };
         }
       } catch (err) {
-        console.warn('POST /api/images/products fallback:', err?.message);
+        console.warn('Backend S3 product image upload notice:', err?.response?.data?.message || err?.message);
+        throw err;
       }
     }
-    return this.uploadFile(file, onProgress, 'products');
+
+    // Local / mock fallback
+    let base64Url = null;
+    try {
+      base64Url = await compressImageFile(file, { maxDim: 800, quality: 0.75 });
+    } catch (_) {}
+    if (!base64Url) {
+      base64Url = await fileToBase64(file);
+    }
+    if (onProgress) onProgress(100);
+    return {
+      success: true,
+      url: base64Url,
+      imageUrl: base64Url,
+      fileUrl: base64Url,
+      fileName: file.name,
+      fileSize: file.size,
+      isLocalPreview: true,
+    };
   },
 
   /**
-   * 4.8 Upload Multiple Product Images
-   * POST /api/images/multiple
+   * Phase 1b: Upload Multiple Product Images to AWS S3
+   * Endpoint: POST /api/images/multiple?folder=products (multipart/form-data: files)
    */
   async uploadMultipleProductImages(files, onProgress) {
     if (!files || !files.length) return [];
@@ -63,41 +106,79 @@ export const uploadService = {
       try {
         const formData = new FormData();
         Array.from(files).forEach((f) => formData.append('files', f));
-        const res = await apiClient.post('/api/images/multiple', formData, {
-          timeout: 30000,
-          onUploadProgress: (e) => {
-            if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));
-          },
-        });
+        formData.append('folder', 'products');
+
+        let res;
+        try {
+          res = await apiClient.post('/api/images/multiple?folder=products', formData, {
+            timeout: 45000,
+            onUploadProgress: (e) => {
+              if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));
+            },
+          });
+        } catch (err1) {
+          res = await apiClient.post('/api/images/multiple', formData, {
+            timeout: 45000,
+            onUploadProgress: (e) => {
+              if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));
+            },
+          });
+        }
+
         const data = res.data?.data || res.data;
-        if (Array.isArray(data)) return data;
-        if (data?.files && Array.isArray(data.files)) return data.files;
+        if (Array.isArray(data)) {
+          return data.map((d) => d?.imageUrl || d?.fileUrl || d?.url || d).filter(Boolean);
+        }
+        if (data?.files && Array.isArray(data.files)) {
+          return data.files.map((d) => d?.imageUrl || d?.fileUrl || d?.url || d).filter(Boolean);
+        }
       } catch (err) {
-        console.warn('POST /api/images/multiple fallback:', err?.message);
+        console.warn('Backend multiple image upload notice:', err?.message);
       }
     }
+
     const uploaded = [];
     for (const f of files) {
-      const res = await this.uploadFile(f, onProgress, 'products');
-      uploaded.push(res);
+      const res = await this.uploadProductImage(f, onProgress);
+      if (res?.url) uploaded.push(res.url);
     }
     return uploaded;
   },
+
   /**
-   * 2.1 Upload Product / Brand / Store Image to AWS S3 backend
-   * Endpoint: POST /api/images/upload?type=products|stores|brands|categories
-   * Content-Type: multipart/form-data
-   * @param {File|Blob} file
-   * @param {Function} onProgress
-   * @param {string} type - 'products' | 'stores' | 'brands' | 'categories' | 'documents'
+   * Helper to convert Base64/DataURL/Blob to a File and upload to S3
+   */
+  async uploadBase64Image(base64Data, filename = 'product_image.webp') {
+    if (!base64Data || typeof base64Data !== 'string') return null;
+    try {
+      const arr = base64Data.split(',');
+      const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/webp';
+      const bstr = atob(arr[1] || arr[0]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      const file = new File([u8arr], filename, { type: mime });
+      return await this.uploadProductImage(file);
+    } catch (e) {
+      console.warn('uploadBase64Image conversion error:', e.message);
+      return null;
+    }
+  },
+
+  /**
+   * General upload delegator for backwards compatibility
    */
   async uploadFile(file, onProgress, type = 'products') {
     if (!file) throw new Error('No file provided');
+    if (type === 'products') {
+      return this.uploadProductImage(file, onProgress);
+    }
 
-    // Validation
-    const maxSize = 5 * 1024 * 1024; // 5MB limit
+    const maxSize = 15 * 1024 * 1024;
     if (file.size > maxSize) {
-      throw new Error(`File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds maximum limit of 5MB.`);
+      throw new Error(`File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds maximum limit of 15MB.`);
     }
 
     const isImage = file.type?.startsWith('image/') || /\.(png|jpe?g|webp|svg)$/i.test(file.name || '');
@@ -108,9 +189,8 @@ export const uploadService = {
         formData.append('file', file);
         formData.append('folder', type);
 
-        // 1. Direct POST to /api/images/upload?type=<type>
         const response = await apiClient.post(`/api/images/upload?type=${type}`, formData, {
-          timeout: 15000,
+          timeout: 20000,
           onUploadProgress: (progressEvent) => {
             if (onProgress && progressEvent.total) {
               const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -137,11 +217,10 @@ export const uploadService = {
           };
         }
       } catch (err) {
-        // Quiet fallback to persistent Base64 Data URL if backend upload fails or is offline
+        // Fallback
       }
     }
 
-    // Fallback: Convert to permanent Base64 Data URL (survives page refresh & localStorage)
     let base64Url = null;
     try {
       base64Url = await compressImageFile(file, { maxDim: 800, quality: 0.75 });
@@ -163,3 +242,5 @@ export const uploadService = {
     };
   }
 };
+
+export default uploadService;

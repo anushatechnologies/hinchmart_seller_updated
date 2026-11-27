@@ -3,6 +3,7 @@ import { db } from '../mock/db.js';
 import { getCleanProductImages } from '../utils/productImages.js';
 import { categoryService } from './category.service.js';
 import { INITIAL_PRODUCTS } from '../mock/seedData.js';
+import { uploadService } from './upload.service.js';
 
 /**
  * Intelligently extracts or parses physical dimensions and weight from specifications
@@ -1183,10 +1184,28 @@ export const sellerProductService = {
       cleanSpecs['Weight'] = `${parsedWeightKg} kg`;
     }
 
-    // Filter images so only clean HTTP/S3 URLs are sent (no raw uncompressed base64 data URLs)
-    const cleanImages = (Array.isArray(images) ? images : []).filter(
-      (img) => typeof img === 'string' && (img.startsWith('http://') || img.startsWith('https://'))
-    );
+    // Ensure all images are valid public S3 URLs (uploading any un-uploaded Files/base64 to S3 first)
+    const rawImgs = Array.isArray(images) ? images : (productData.imageUrl ? [productData.imageUrl] : []);
+    const cleanImages = [];
+    for (const img of rawImgs) {
+      if (typeof img === 'string' && (img.startsWith('http://') || img.startsWith('https://'))) {
+        cleanImages.push(img);
+      } else if (img instanceof File || img instanceof Blob) {
+        try {
+          const res = await uploadService.uploadProductImage(img);
+          if (res?.url) cleanImages.push(res.url);
+        } catch (e) {
+          console.warn('Auto S3 upload for File notice:', e.message);
+        }
+      } else if (typeof img === 'string' && (img.startsWith('data:image/') || img.startsWith('blob:'))) {
+        try {
+          const res = await uploadService.uploadBase64Image(img);
+          if (res?.url) cleanImages.push(res.url);
+        } catch (e) {
+          console.warn('Auto S3 upload for base64 notice:', e.message);
+        }
+      }
+    }
 
     // Strictly match com.hinchmart.dto.SellerProductCreateRequest schema
     const cleanApiPayload = {
@@ -1410,6 +1429,28 @@ export const sellerProductService = {
     const parsedWeightKg = resolvedDims.weight !== null ? resolvedDims.weight : undefined;
     const parsedWeightGrams = parsedWeightKg ? Math.round(parsedWeightKg * 1000) : (updates.weightGrams ? Number(updates.weightGrams) : (localProd.weightGrams ?? undefined));
 
+    const rawUpdateImgs = Array.isArray(images) ? images : (updates.imageUrl ? [updates.imageUrl] : []);
+    const cleanImages = [];
+    for (const img of rawUpdateImgs) {
+      if (typeof img === 'string' && (img.startsWith('http://') || img.startsWith('https://'))) {
+        cleanImages.push(img);
+      } else if (img instanceof File || img instanceof Blob) {
+        try {
+          const res = await uploadService.uploadProductImage(img);
+          if (res?.url) cleanImages.push(res.url);
+        } catch (e) {
+          console.warn('Auto S3 upload for File in update notice:', e.message);
+        }
+      } else if (typeof img === 'string' && (img.startsWith('data:image/') || img.startsWith('blob:'))) {
+        try {
+          const res = await uploadService.uploadBase64Image(img);
+          if (res?.url) cleanImages.push(res.url);
+        } catch (e) {
+          console.warn('Auto S3 upload for base64 in update notice:', e.message);
+        }
+      }
+    }
+
     const cleanSpecs = { ...(localProd.specifications || {}), ...(updates.specifications || {}) };
     if (parsedLength && parsedWidth && !cleanSpecs['Dimensions'] && !cleanSpecs['dimensions']) {
       cleanSpecs['Dimensions'] = `${parsedLength} × ${parsedWidth}${parsedHeight ? ` × ${parsedHeight}` : ''} mm`;
@@ -1507,7 +1548,7 @@ export const sellerProductService = {
       stockQty: parsedStock,
       moq: parsedMoq,
       is24HourDelivery: updates.is24HourDelivery !== undefined ? Boolean(updates.is24HourDelivery) : undefined,
-      images: (Array.isArray(images) ? images : []).filter(img => typeof img === 'string' && (img.startsWith('http://') || img.startsWith('https://'))),
+      images: cleanImages,
       specifications: cleanSpecs,
       bulkPricingTiers: updates.bulkPricingTiers,
     };

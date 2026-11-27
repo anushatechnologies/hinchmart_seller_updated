@@ -143,7 +143,7 @@ export function AddProductModal({ isOpen, onClose, initialData = {} }) {
 
     for (const file of files) {
       try {
-        const res = await uploadService.uploadFile(file, null, 'products');
+        const res = await uploadService.uploadProductImage(file);
         if (res?.url) {
           setImages((prev) => [...prev, res.url]);
         }

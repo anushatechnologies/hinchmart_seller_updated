@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { UploadCloud, X, Star, AlertCircle } from 'lucide-react';
 import { Button } from '../common/Button';
 import { compressImageFile } from '../../utils/imageCompressor';
+import { uploadService } from '../../services/upload.service';
 
 export function ImageUploader({
   images = [],
@@ -19,12 +20,18 @@ export function ImageUploader({
     for (const file of files) {
       if (newImgs.length < maxImages) {
         try {
-          const compressed = await compressImageFile(file);
-          if (compressed && newImgs.length < maxImages) {
-            newImgs.push(compressed);
+          const res = await uploadService.uploadProductImage(file);
+          if (res?.url && newImgs.length < maxImages) {
+            newImgs.push(res.url);
           }
         } catch (err) {
-          console.error('Failed to compress image:', err);
+          console.warn('S3 upload notice, fallback to compressed preview:', err?.message);
+          try {
+            const compressed = await compressImageFile(file);
+            if (compressed && newImgs.length < maxImages) {
+              newImgs.push(compressed);
+            }
+          } catch (_) {}
         }
       }
     }
