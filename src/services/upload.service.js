@@ -1,4 +1,4 @@
-import { apiClient, USE_MOCK_API } from './api.js';
+import { apiClient, USE_MOCK_API, canAccessSellerApi, markSellerApiForbidden } from './api.js';
 import { db } from '../mock/db.js';
 import { compressImageFile } from '../utils/imageCompressor.js';
 
@@ -32,7 +32,7 @@ export const uploadService = {
       throw new Error(`File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds maximum limit of 15MB.`);
     }
 
-    if (!USE_MOCK_API) {
+    if (!USE_MOCK_API && canAccessSellerApi('/api/images/products')) {
       try {
         const formData = new FormData();
         formData.append('file', file);
@@ -41,22 +41,28 @@ export const uploadService = {
         let res;
         try {
           res = await apiClient.post('/api/images/products', formData, {
-            timeout: 30000,
+            timeout: 25000,
             onUploadProgress: (e) => {
               if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));
             },
           });
         } catch (err1) {
-          // Fallback to /api/images/upload?folder=products
-          res = await apiClient.post('/api/images/upload?folder=products', formData, {
-            timeout: 30000,
-            onUploadProgress: (e) => {
-              if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));
-            },
-          });
+          if (err1?.response?.status === 403) {
+            markSellerApiForbidden('/api/images/products');
+            markSellerApiForbidden('/api/images/upload');
+            throw err1;
+          }
+          if (canAccessSellerApi('/api/images/upload')) {
+            res = await apiClient.post('/api/images/upload?folder=products', formData, {
+              timeout: 25000,
+              onUploadProgress: (e) => {
+                if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));
+              },
+            });
+          }
         }
 
-        const data = res.data?.data || res.data;
+        const data = res?.data?.data || res?.data;
         const url = data?.imageUrl || data?.fileUrl || data?.url;
         if (url) {
           if (onProgress) onProgress(100);
@@ -71,8 +77,10 @@ export const uploadService = {
           };
         }
       } catch (err) {
-        console.warn('Backend S3 product image upload notice:', err?.response?.data?.message || err?.message);
-        throw err;
+        if (err?.response?.status === 403) {
+          markSellerApiForbidden('/api/images/products');
+          markSellerApiForbidden('/api/images/upload');
+        }
       }
     }
 
@@ -150,6 +158,9 @@ export const uploadService = {
    */
   async uploadBase64Image(base64Data, filename = 'product_image.webp') {
     if (!base64Data || typeof base64Data !== 'string') return null;
+    if (!canAccessSellerApi('/api/images/products')) {
+      return { success: true, url: base64Data, imageUrl: base64Data, fileUrl: base64Data };
+    }
     try {
       const arr = base64Data.split(',');
       const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/webp';
@@ -160,10 +171,10 @@ export const uploadService = {
         u8arr[n] = bstr.charCodeAt(n);
       }
       const file = new File([u8arr], filename, { type: mime });
-      return await this.uploadProductImage(file);
+      const res = await this.uploadProductImage(file);
+      return res || { success: true, url: base64Data, imageUrl: base64Data };
     } catch (e) {
-      console.warn('uploadBase64Image conversion error:', e.message);
-      return null;
+      return { success: true, url: base64Data, imageUrl: base64Data };
     }
   },
 

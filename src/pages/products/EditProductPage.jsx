@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   Sliders,
   Tag,
-  Warehouse,
   Image as ImageIcon,
   CheckCircle2,
   AlertTriangle,
@@ -32,7 +31,7 @@ export function EditProductPage() {
 
   const { product, isLoading, updateProduct, isUpdating } = useProduct(id);
   const { categories = [] } = useCategories();
-  const { warehouses } = useInventory();
+  // Warehouse inventory is optional - only stock is required
 
   const [formData, setFormData] = useState(null);
 
@@ -495,35 +494,30 @@ export function EditProductPage() {
           </div>
         </div>
 
-        {/* Section 5: Inventory */}
+        {/* Section 5: Inventory & Stock */}
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs space-y-4">
           <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <Warehouse className="w-4 h-4 text-emerald-600" /> Warehouse Inventory & Tracking
+            <Package className="w-4 h-4 text-emerald-600" /> Stock & Inventory
           </h3>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
-              label={`Current Stock (${formData.unit})`}
+              label={`Current Stock (${formData.unit || 'Piece'})`}
               type="number"
-              value={formData.stock}
-              onChange={(e) => handleFieldChange('stock', Number(e.target.value))}
+              value={formData.stock ?? formData.stockQty ?? 0}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                handleFieldChange('stock', val);
+                handleFieldChange('stockQty', val);
+              }}
               required
             />
 
             <Input
-              label="Low Stock Threshold"
+              label="Low Stock Threshold (Optional)"
               type="number"
-              value={formData.lowStockThreshold}
-              onChange={(e) => handleFieldChange('lowStockThreshold', Number(e.target.value))}
-              required
-            />
-
-            <Select
-              label="Warehouse Assignment"
-              options={warehouses.map((w) => ({ value: w.id, label: `${w.name} (${w.city})` }))}
-              value={formData.warehouseId}
-              onChange={(e) => handleFieldChange('warehouseId', e.target.value)}
-              required
+              value={formData.lowStockThreshold ?? ''}
+              onChange={(e) => handleFieldChange('lowStockThreshold', e.target.value ? Number(e.target.value) : null)}
             />
           </div>
 
