@@ -21,6 +21,7 @@ export function useInventory(filters = {}) {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['seller-products'] });
       addToast({
         title: 'Stock Updated',
         message: `Inventory for ${data.name} updated to ${data.stock} ${data.unit}`,

@@ -47,8 +47,30 @@ export function EditProductPage() {
       }
       setFormData({
         ...product,
+        name: product.name || product.title || '',
+        title: product.title || product.name || '',
+        sku: product.sku || '',
+        hsnCode: product.hsnCode || product.hsn || '',
+        shortDescription: product.shortDescription || product.description || '',
+        fullDescription: product.fullDescription || product.description || '',
+        description: product.description || '',
+        mrp: product.mrp !== undefined ? product.mrp : (product.price || 0),
+        sellingPrice: product.sellingPrice !== undefined ? product.sellingPrice : (product.price || 0),
+        unit: product.unit || 'Piece',
+        category: product.categoryId || product.category || '',
+        categoryId: product.categoryId || product.category || '',
+        subcategory: product.subcategoryId || product.subcategory || '',
+        subcategoryId: product.subcategoryId || product.subcategory || '',
+        brand: product.brandName || product.brand || '',
+        brandName: product.brandName || product.brand || '',
+        brandId: product.brandId || '',
+        stock: product.stockQty ?? product.stock ?? 0,
+        stockQty: product.stockQty ?? product.stock ?? 0,
+        moq: product.moq ?? 1,
+        gstRate: product.gstRate ?? 18,
         specifications: typeof initialSpecs === 'object' && initialSpecs !== null ? initialSpecs : {},
         pricingTiers: product.pricingTiers || product.bulkPricingTiers || [],
+        images: Array.isArray(product.images) && product.images.length > 0 ? product.images : (product.imageUrl ? [product.imageUrl] : []),
       });
     }
   }, [product]);
@@ -129,10 +151,12 @@ export function EditProductPage() {
     try {
       const updates = {
         ...formData,
+        name: formData.name || formData.title || 'Product',
+        title: formData.title || formData.name || 'Product',
         // When seller re-submits a rejected product, it resets to PENDING for Admin review!
-        status: isRejected ? 'PENDING' : (formData.status || 'PENDING'),
-        approvalStatus: isRejected ? 'PENDING' : (formData.approvalStatus || 'PENDING'),
-        active: false,
+        status: isRejected ? 'PENDING' : (formData.status || product?.status || 'PENDING'),
+        approvalStatus: isRejected ? 'PENDING' : (formData.approvalStatus || product?.approvalStatus || 'PENDING'),
+        active: isRejected ? false : Boolean(formData.active !== undefined ? formData.active : (product?.active ?? true)),
         deletedByAdmin: false,
         rejectionReason: isRejected ? null : formData.rejectionReason,
         reSubmittedAt: isRejected ? new Date().toISOString() : formData.reSubmittedAt,
@@ -140,10 +164,9 @@ export function EditProductPage() {
       };
 
       await updateProduct(updates);
-      navigate('/seller/products');
+      navigate(`/seller/products/${id}`);
     } catch (err) {
       console.warn('Product save notice:', err);
-      navigate('/seller/products');
     }
   };
 
@@ -159,7 +182,7 @@ export function EditProductPage() {
           </Link>
           <div>
             <h1 className="text-xl font-extrabold text-slate-900">
-              Edit Product: {formData.name}
+              Edit Product: {formData.name || formData.title}
             </h1>
             <p className="text-xs text-slate-500 font-mono">SKU: {formData.sku}</p>
           </div>
@@ -212,7 +235,7 @@ export function EditProductPage() {
         </div>
       )}
 
-      <form onSubmit={handleSave} className="space-y-6">
+      <form noValidate onSubmit={handleSave} className="space-y-6">
         {/* Section 1: Basic Info */}
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs space-y-4">
           <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
@@ -222,31 +245,37 @@ export function EditProductPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Product Title"
-              value={formData.name}
-              onChange={(e) => handleFieldChange('name', e.target.value)}
+              value={formData.name || formData.title || ''}
+              onChange={(e) => {
+                handleFieldChange('name', e.target.value);
+                handleFieldChange('title', e.target.value);
+              }}
               required
             />
 
             <Input
               label="Product ID"
-              value={formData.productId || formData.id}
+              value={formData.productId || formData.id || ''}
               onChange={(e) => handleFieldChange('productId', e.target.value)}
+              disabled
             />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="SKU Code"
-              value={formData.sku}
+              value={formData.sku || ''}
               onChange={(e) => handleFieldChange('sku', e.target.value)}
               required
             />
 
             <Input
-              label="HSN / SAC Code"
-              value={formData.hsnCode}
-              onChange={(e) => handleFieldChange('hsnCode', e.target.value)}
-              required
+              label="HSN / SAC Code (Optional)"
+              value={formData.hsnCode || formData.hsn || ''}
+              onChange={(e) => {
+                handleFieldChange('hsnCode', e.target.value);
+                handleFieldChange('hsn', e.target.value);
+              }}
             />
           </div>
 
@@ -254,7 +283,7 @@ export function EditProductPage() {
             <Select
               label="Category"
               options={categories.map((c) => ({ value: c.id || c.categoryId, label: c.name }))}
-              value={formData.category || formData.categoryId}
+              value={formData.category || formData.categoryId || ''}
               onChange={(e) => handleCategoryChange(e.target.value)}
               required
             />
@@ -265,7 +294,7 @@ export function EditProductPage() {
                 value: s.name || s.id,
                 label: s.name,
               }))}
-              value={formData.subcategory || formData.subcategoryId}
+              value={formData.subcategory || formData.subcategoryId || ''}
               onChange={(e) => handleSubcategoryChange(e.target.value)}
               disabled={!categoryId}
               required
@@ -310,19 +339,17 @@ export function EditProductPage() {
           </div>
 
           <Textarea
-            label="Short Description"
+            label="Short Description (Optional)"
             rows={2}
-            value={formData.shortDescription}
+            value={formData.shortDescription || ''}
             onChange={(e) => handleFieldChange('shortDescription', e.target.value)}
-            required
           />
 
           <Textarea
-            label="Full Technical Description"
+            label="Full Technical Description (Optional)"
             rows={4}
-            value={formData.fullDescription}
+            value={formData.fullDescription || ''}
             onChange={(e) => handleFieldChange('fullDescription', e.target.value)}
-            required
           />
         </div>
 

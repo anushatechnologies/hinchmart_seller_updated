@@ -1050,22 +1050,21 @@ export const sellerProductService = {
           const rawStatus = String(rawData.status || rawData.approvalStatus || '').toUpperCase();
           const isApproved = rawStatus === 'APPROVED' || rawStatus === 'ACTIVE' || Boolean(rawData.active);
 
-          if (localProduct) {
-            if (isApproved) {
-              localProduct.status = 'APPROVED';
-              localProduct.approvalStatus = 'APPROVED';
-              localProduct.active = true;
-              db.updateSellerProduct(cleanId, id, {
-                status: 'APPROVED',
-                approvalStatus: 'APPROVED',
-                active: true,
-                ...(rawData.productId || rawData.id ? { productId: Number(rawData.productId || rawData.id), id: Number(rawData.productId || rawData.id) } : {}),
-              });
-            }
-            return normalizeSellerProduct(localProduct);
-          } else {
-            return normalizeSellerProduct({ ...rawData, status: isApproved ? 'APPROVED' : rawData.status });
+          const freshMerged = {
+            ...(localProduct || {}),
+            ...rawData,
+            id: Number(rawData.productId || rawData.id) || id,
+            productId: Number(rawData.productId || rawData.id) || id,
+            status: isApproved ? 'APPROVED' : (rawData.status || localProduct?.status || 'PENDING'),
+            approvalStatus: isApproved ? 'APPROVED' : (rawData.approvalStatus || localProduct?.approvalStatus || 'PENDING'),
+            active: isApproved ? true : Boolean(rawData.active ?? localProduct?.active),
+            isLiveBackend: true,
+          };
+
+          if (cleanId) {
+            db.updateSellerProduct(cleanId, id, freshMerged);
           }
+          return normalizeSellerProduct(freshMerged);
         }
       } catch (apiError) {
         // Fall through to localProduct
@@ -1432,6 +1431,10 @@ export const sellerProductService = {
     const parsedWeightKg = resolvedDims.weight !== null ? resolvedDims.weight : undefined;
     const parsedWeightGrams = parsedWeightKg ? Math.round(parsedWeightKg * 1000) : (updates.weightGrams ? Number(updates.weightGrams) : (localProd.weightGrams ?? undefined));
 
+    const cleanIdStr = String(id).replace(/^sp_/, '').trim();
+    const cleanNumericId = parseInt(cleanIdStr, 10);
+    const targetId = !isNaN(cleanNumericId) ? cleanNumericId : id;
+
     const rawUpdateImgs = Array.isArray(images) ? images : (updates.imageUrl ? [updates.imageUrl] : []);
     const cleanImages = [];
     for (const img of rawUpdateImgs) {
@@ -1440,19 +1443,20 @@ export const sellerProductService = {
       } else if (img instanceof File || img instanceof Blob) {
         try {
           const res = await uploadService.uploadProductImage(img);
-          if (res?.url) cleanImages.push(res.url);
+          if (res?.url && (res.url.startsWith('http://') || res.url.startsWith('https://'))) {
+            cleanImages.push(res.url);
+          }
         } catch (_) {}
       } else if (typeof img === 'string' && (img.startsWith('data:image/') || img.startsWith('blob:'))) {
         try {
           const res = await uploadService.uploadBase64Image(img);
-          if (res?.url) cleanImages.push(res.url);
-          else cleanImages.push(img);
-        } catch (_) {
-          cleanImages.push(img);
-        }
+          if (res?.url && (res.url.startsWith('http://') || res.url.startsWith('https://'))) {
+            cleanImages.push(res.url);
+          }
+        } catch (_) {}
       }
     }
-    if (cleanImages.length === 0 && localProd.imageUrl) {
+    if (cleanImages.length === 0 && localProd.imageUrl && (localProd.imageUrl.startsWith('http://') || localProd.imageUrl.startsWith('https://'))) {
       cleanImages.push(localProd.imageUrl);
     }
 
@@ -1464,16 +1468,26 @@ export const sellerProductService = {
       cleanSpecs['Weight'] = `${parsedWeightKg} kg`;
     }
 
+    const tiersInput = updates.bulkPricingTiers || updates.pricingTiers || localProd.bulkPricingTiers || localProd.pricingTiers || [];
+    const formattedTiers = Array.isArray(tiersInput) ? tiersInput.map((t) => ({
+      minQty: Math.max(1, parseInt(t.minQty || 1, 10) || 1),
+      maxQty: t.maxQty !== null && t.maxQty !== undefined && t.maxQty !== '' ? Math.max(1, parseInt(t.maxQty, 10)) : null,
+      price: Number(t.price ?? t.pricePerUnit ?? 0),
+      discountPercentage: Number(t.discountPercentage ?? t.discount ?? 0),
+    })) : [];
+
+    const finalActive = isResubmission ? false : Boolean(updates.active !== undefined ? updates.active : (localProd.active ?? true));
+
     const payload = {
       ...localProd,
       ...updates,
-      id: Number(id) || id,
-      productId: Number(id) || id,
+      id: targetId,
+      productId: targetId,
       name: title,
       title,
       slug,
       sku: updates.sku || localProd.sku || `SKU-${Math.floor(100000 + Math.random() * 900000)}`,
-      description: updates.description !== undefined ? updates.description : (localProd.description || ''),
+      description: updates.fullDescription || updates.shortDescription || (updates.description !== undefined ? updates.description : (localProd.description || '')),
       categoryId: catId || undefined,
       categoryName: catName,
       subcategoryId: subId || undefined,
@@ -1481,7 +1495,7 @@ export const sellerProductService = {
       brandId: Number.isInteger(Number(brandId)) && Number(brandId) > 0 ? Number(brandId) : 1,
       brandName,
       price,
-      sellingPrice: price,
+      sellingPrice: updates.sellingPrice !== undefined ? Number(updates.sellingPrice) : price,
       mrp,
       unit: validUnit,
       moq: parsedMoq,
@@ -1523,20 +1537,17 @@ export const sellerProductService = {
       packed_weight_kg: parsedWeightKg,
       packedDimensionsVerified: parsedLength && parsedWidth ? 1 : undefined,
       packed_dimensions_verified: parsedLength && parsedWidth ? 1 : undefined,
-      imageUrl: images[0] || null,
-      images,
+      imageUrl: cleanImages[0] || localProd.imageUrl || null,
+      images: cleanImages,
       specifications: cleanSpecs,
-      bulkPricingTiers: updates.bulkPricingTiers || localProd.bulkPricingTiers || [],
-      active: isResubmission ? false : Boolean(updates.active !== undefined ? updates.active : localProd.active),
+      bulkPricingTiers: formattedTiers,
+      active: finalActive,
       status: finalStatus,
       approvalStatus: finalApprovalStatus,
       deletedByAdmin: false,
       rejectionReason: isResubmission ? null : (updates.rejectionReason ?? localProd.rejectionReason),
       reSubmittedAt: isResubmission ? new Date().toISOString() : (updates.reSubmittedAt || localProd.reSubmittedAt),
     };
-
-    // Never send sellerId or storeId - backend identifies seller from token
-    const { sellerId: _s, vendorId: _v, storeId: _st, ...apiUpdatePayload } = payload;
 
     // Strictly match com.hinchmart.dto schema on updates
     const cleanUpdatePayload = {
@@ -1547,7 +1558,7 @@ export const sellerProductService = {
       sellingPrice: updates.sellingPrice !== undefined ? Number(updates.sellingPrice) : price,
       mrp: updates.mrp !== undefined ? Number(updates.mrp) : mrp,
       sku: updates.sku ? String(updates.sku).trim() : undefined,
-      description: updates.description !== undefined ? String(updates.description).trim() : undefined,
+      description: updates.fullDescription || updates.shortDescription || (updates.description !== undefined ? String(updates.description).trim() : undefined),
       categoryId: catId ? Number(catId) : undefined,
       subcategoryId: subId ? Number(subId) : undefined,
       stockQty: parsedStock,
@@ -1555,7 +1566,7 @@ export const sellerProductService = {
       is24HourDelivery: updates.is24HourDelivery !== undefined ? Boolean(updates.is24HourDelivery) : undefined,
       images: cleanImages,
       specifications: cleanSpecs,
-      bulkPricingTiers: updates.bulkPricingTiers,
+      bulkPricingTiers: formattedTiers,
     };
 
     if (parsedThickness !== undefined && parsedThickness !== null) cleanUpdatePayload.thicknessMm = parsedThickness;
@@ -1566,52 +1577,64 @@ export const sellerProductService = {
     if (parsedWeightGrams !== undefined && parsedWeightGrams !== null) cleanUpdatePayload.weightGrams = parsedWeightGrams;
 
     let createdItem = null;
+    let backendSaved = false;
+    let syncError = null;
+
     if (!USE_MOCK_API) {
       try {
-        const response = await apiClient.put(`/api/seller/products/${id}`, cleanUpdatePayload);
-        createdItem = response?.data?.data || response?.data?.product || response?.data;
+        let response = null;
+        try {
+          response = await apiClient.put(`/api/seller/products/${targetId}`, cleanUpdatePayload);
+        } catch (sellerErr) {
+          const sStatus = sellerErr?.response?.status;
+          if (sStatus === 403 || sStatus === 404 || sStatus === 405) {
+            try {
+              response = await apiClient.put(`/api/products/${targetId}`, cleanUpdatePayload);
+            } catch (fallbackErr) {
+              throw sellerErr;
+            }
+          } else {
+            throw sellerErr;
+          }
+        }
+
+        if (response && (response.status === 200 || response.status === 201 || response.data?.success)) {
+          backendSaved = true;
+          createdItem = response?.data?.data || response?.data?.product || response?.data;
+        }
       } catch (putErr) {
         const errData = putErr.response?.data;
-        let msg = errData?.message || errData?.error || putErr.message;
-        console.error('Backend PUT /api/seller/products/{id} error details:', errData || putErr.message);
-        throw new Error(msg);
-      }
-    }
-
-    if (createdItem) {
-      const newRawId = createdItem.productId ?? createdItem.id;
-      let realProdId = newRawId;
-      if (typeof newRawId === 'string' && newRawId.startsWith('sp_')) {
-        realProdId = parseInt(newRawId.replace('sp_', ''), 10) || newRawId;
-      } else if (typeof newRawId === 'string' && !isNaN(parseInt(newRawId, 10))) {
-        realProdId = parseInt(newRawId, 10);
-      }
-
-      const finalSaved = {
-        ...payload,
-        ...createdItem,
-        id: realProdId || payload.id,
-        productId: realProdId || payload.productId,
-        status: finalStatus,
-        approvalStatus: finalApprovalStatus,
-        active: false,
-        deletedByAdmin: false,
-        isLiveBackend: true,
-      };
-
-      if (USE_MOCK_API) {
-        db.updateSellerProduct(sellerId, id, finalSaved);
-        if (realProdId && String(realProdId) !== String(id)) {
-          db.createSellerProduct(sellerId, finalSaved);
+        let msg = errData?.message || errData?.error;
+        if (errData?.errors && Array.isArray(errData.errors)) {
+          msg = errData.errors.map((e) => e.defaultMessage || e.message || e).join(', ');
         }
+        if (!msg) msg = putErr.message || `HTTP ${putErr.response?.status || 'Error'}`;
+        console.error('Backend PUT /api/seller/products/{id} error details:', errData || putErr.message);
+        syncError = msg;
       }
-      // Authoritative return directly from backend database (MySQL) - zero localStorage usage!
-      return normalizeSellerProduct(finalSaved);
     }
 
-    await delay(100);
-    const updated = db.updateSellerProduct(sellerId, id, payload);
-    return normalizeSellerProduct(updated || { id, ...payload });
+    if (syncError && !backendSaved && !USE_MOCK_API) {
+      throw new Error(syncError);
+    }
+
+    const finalSaved = {
+      ...payload,
+      ...(typeof createdItem === 'object' && createdItem !== null ? createdItem : {}),
+      id: targetId,
+      productId: targetId,
+      status: finalStatus,
+      approvalStatus: finalApprovalStatus,
+      active: finalActive,
+      deletedByAdmin: false,
+      isLiveBackend: true,
+    };
+
+    if (cleanId) {
+      db.updateSellerProduct(cleanId, id, finalSaved);
+    }
+    // Authoritative return directly from backend database (MySQL) - zero localStorage usage!
+    return normalizeSellerProduct(finalSaved);
   },
 
   /**

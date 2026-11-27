@@ -16,6 +16,7 @@ export function usePricing() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pricing'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['seller-products'] });
       addToast({
         title: 'Price Updated',
         message: 'Product pricing updated successfully',
@@ -36,6 +37,7 @@ export function usePricing() {
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['pricing'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['seller-products'] });
       addToast({
         title: 'Bulk Pricing Applied',
         message: `Successfully adjusted pricing for ${res.modifiedCount} products`,

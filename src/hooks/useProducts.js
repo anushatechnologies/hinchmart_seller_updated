@@ -178,6 +178,8 @@ export function useProduct(id) {
     mutationFn: (updates) => sellerProductService.updateSellerProduct(id, updates),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: PRODUCT_QUERY_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: PRODUCT_QUERY_KEYS.detail(id) });
       if (data) {
         queryClient.setQueryData(PRODUCT_QUERY_KEYS.detail(id), data);
       }
@@ -185,6 +187,13 @@ export function useProduct(id) {
         title: 'Product Updated',
         message: `${data?.title || data?.name || 'Product'} saved successfully`,
         type: 'success',
+      });
+    },
+    onError: (error) => {
+      addToast({
+        title: 'Update Failed',
+        message: error.message || 'Failed to update product in database',
+        type: 'error',
       });
     },
   });
