@@ -1131,14 +1131,34 @@ export const sellerProductService = {
       rawBrandName
     );
 
-    const validUnit = String(productData.unit || 'Pieces').trim();
+    // Ensure unit is valid for Spring Boot enum / validation
+    let validUnit = String(productData.unit || 'PIECE').trim().toUpperCase();
+    if (validUnit === 'PIECES' || validUnit === 'PIECE' || validUnit === 'PCS' || validUnit === 'UNIT') validUnit = 'PIECE';
+    else if (validUnit === 'SHEETS' || validUnit === 'SHEET') validUnit = 'SHEET';
+    else if (validUnit === 'METERS' || validUnit === 'METER' || validUnit === 'M' || validUnit.includes('METER')) validUnit = 'METER';
+    else if (validUnit === 'KGS' || validUnit === 'KG') validUnit = 'KG';
+    else if (validUnit.includes('BOX')) validUnit = 'BOX';
+    else if (validUnit.includes('BAG')) validUnit = 'BAG';
+    else if (!validUnit) validUnit = 'PIECE';
+
     const parsedGst = Math.max(0, Math.min(100, parseInt(productData.gstRate ?? productData.gst ?? 18, 10) || 18));
     const parsedMoq = Math.max(1, parseInt(productData.moq || 1, 10) || 1);
     const parsedStock = Math.max(0, parseInt(productData.stockQty ?? productData.stock ?? 0, 10) || 0);
 
-    const finalBrandId = Number.isInteger(Number(brandId)) && Number(brandId) > 0
+    let finalBrandId = Number.isInteger(Number(brandId)) && Number(brandId) > 0
       ? Number(brandId)
-      : (Number.isInteger(Number(productData.brandId)) && Number(productData.brandId) > 0 ? Number(productData.brandId) : 1);
+      : (Number.isInteger(Number(productData.brandId)) && Number(productData.brandId) > 0 ? Number(productData.brandId) : null);
+
+    if (!finalBrandId) {
+      try {
+        const brandRes = await apiClient.get('/api/brands', { params: { search: brandName, limit: 10 } });
+        const brands = Array.isArray(brandRes.data) ? brandRes.data : (brandRes.data?.data || brandRes.data?.brands || []);
+        if (brands.length > 0) {
+          finalBrandId = Number(brands[0].brandId || brands[0].id);
+        }
+      } catch (_) {}
+    }
+    if (!finalBrandId) finalBrandId = 453; // Fallback to verified existing brand in database
 
     const resolvedDims = extractDimensionsFromSpecs(productData.specifications, {
       lengthMm: productData.lengthMm ?? productData.length_mm ?? productData.length ?? productData.packedLengthMm ?? productData.packed_length_mm,
@@ -1163,111 +1183,63 @@ export const sellerProductService = {
       cleanSpecs['Weight'] = `${parsedWeightKg} kg`;
     }
 
-    const payload = {
-      name: title,
-      title,
-      slug,
-      sku: productData.sku || `SKU-${Math.floor(100000 + Math.random() * 900000)}`,
-      description: productData.description || '',
-      categoryId: catId || undefined,
-      categoryName: catName,
-      subcategoryId: subId || undefined,
-      subcategoryName: subName,
+    // Filter images so only clean HTTP/S3 URLs are sent (no raw uncompressed base64 data URLs)
+    const cleanImages = (Array.isArray(images) ? images : []).filter(
+      (img) => typeof img === 'string' && (img.startsWith('http://') || img.startsWith('https://'))
+    );
+
+    // Strictly match com.hinchmart.dto.SellerProductCreateRequest schema
+    const cleanApiPayload = {
+      title: title.trim(),
       brandId: finalBrandId,
-      brandName: brandName,
-      brand: brandName,
-      price,
+      unit: validUnit,
+      price: price,
       sellingPrice: productData.sellingPrice !== undefined ? Number(productData.sellingPrice) : price,
       mrp: productData.mrp !== undefined ? Number(productData.mrp) : (mrp || price),
-      unit: validUnit,
-      moq: parsedMoq,
-      stock: parsedStock,
+      sku: productData.sku ? String(productData.sku).trim() : undefined,
+      description: productData.description ? String(productData.description).trim() : '',
+      categoryId: catId ? Number(catId) : undefined,
+      subcategoryId: subId ? Number(subId) : undefined,
       stockQty: parsedStock,
-      hsn: String(productData.hsn || productData.hsnCode || '').trim(),
-      hsnCode: String(productData.hsnCode || productData.hsn || '').trim(),
-      gstRate: parsedGst,
-      gst: parsedGst,
+      moq: parsedMoq,
       is24HourDelivery: Boolean(productData.is24HourDelivery),
-      is_24hour_delivery: Boolean(productData.is24HourDelivery),
-      is_24_hour_delivery: Boolean(productData.is24HourDelivery),
-      // Physical measurements & dimensions in mm & kg (all aliases for Spring Boot & MySQL compatibility)
-      thicknessMm: parsedThickness,
-      thickness_mm: parsedThickness,
-      thickness: parsedThickness,
-      lengthMm: parsedLength,
-      length_mm: parsedLength,
-      length: parsedLength,
-      widthMm: parsedWidth,
-      width_mm: parsedWidth,
-      width: parsedWidth,
-      heightMm: parsedHeight,
-      height_mm: parsedHeight,
-      height: parsedHeight,
-      weightKg: parsedWeightKg,
-      weight_kg: parsedWeightKg,
-      weight: parsedWeightKg,
-      weightGrams: parsedWeightGrams,
-      weight_grams: parsedWeightGrams,
-      // Packed dimensions for vehicle matching
-      packedLengthMm: parsedLength,
-      packed_length_mm: parsedLength,
-      packedWidthMm: parsedWidth,
-      packed_width_mm: parsedWidth,
-      packedHeightMm: parsedHeight,
-      packed_height_mm: parsedHeight,
-      packedWeightKg: parsedWeightKg,
-      packed_weight_kg: parsedWeightKg,
-      packedDimensionsVerified: parsedLength && parsedWidth ? 1 : undefined,
-      packed_dimensions_verified: parsedLength && parsedWidth ? 1 : undefined,
-      imageUrl: images[0] || productData.imageUrl || null,
-      images,
+      images: cleanImages,
+      specifications: cleanSpecs,
       bulkPricingTiers: (productData.bulkPricingTiers || []).map((t) => ({
         minQty: Math.max(1, parseInt(t.minQty || 1, 10) || 1),
         maxQty: t.maxQty !== null && t.maxQty !== undefined && t.maxQty !== '' ? Math.max(1, parseInt(t.maxQty, 10)) : null,
         price: Number(t.price ?? t.pricePerUnit ?? 0),
         discountPercentage: Number(t.discountPercentage ?? t.discount ?? 0),
       })),
-      specifications: cleanSpecs,
+    };
+
+    if (parsedThickness !== undefined && parsedThickness !== null) cleanApiPayload.thicknessMm = parsedThickness;
+    if (parsedLength !== undefined && parsedLength !== null) cleanApiPayload.lengthMm = parsedLength;
+    if (parsedWidth !== undefined && parsedWidth !== null) cleanApiPayload.widthMm = parsedWidth;
+    if (parsedHeight !== undefined && parsedHeight !== null) cleanApiPayload.heightMm = parsedHeight;
+    if (parsedWeightKg !== undefined && parsedWeightKg !== null) cleanApiPayload.weightKg = parsedWeightKg;
+    if (parsedWeightGrams !== undefined && parsedWeightGrams !== null) cleanApiPayload.weightGrams = parsedWeightGrams;
+
+    const payload = {
+      ...cleanApiPayload,
+      name: title,
+      slug,
+      categoryName: catName,
+      subcategoryName: subName,
+      brandName: brandName,
+      brand: brandName,
+      imageUrl: cleanImages[0] || null,
       active: false,
       status: 'PENDING',
       approvalStatus: 'PENDING',
     };
 
-    // Never send sellerId or storeId in body - backend resolves them from the authenticated seller token
-    const { sellerId: _s, vendorId: _v, storeId: _st, ...apiCreatePayload } = payload;
-
     let realProdId = null;
     let createdItem = null;
-    let syncErrorMsg = null;
 
     if (!USE_MOCK_API) {
       try {
-        // 1. Official POST /api/seller/products (identity resolved from Bearer token)
-        let response = null;
-        try {
-          response = await apiClient.post('/api/seller/products', apiCreatePayload);
-        } catch (sellerErr) {
-          syncErrorMsg = sellerErr.response?.data?.message || sellerErr.response?.statusText || sellerErr.message;
-          // Fallback 1: Try general product endpoint POST /api/products
-          try {
-            response = await apiClient.post('/api/products', apiCreatePayload);
-            syncErrorMsg = null; // Succeeded on fallback
-          } catch (prodErr) {
-            syncErrorMsg = prodErr.response?.data?.message || `HTTP ${prodErr.response?.status}: ${prodErr.response?.statusText || prodErr.message}`;
-            // Fallback 2: Try admin-assisted seller endpoint POST /api/admin/products/sellers/{sellerId}
-            if (numericSellerId) {
-              try {
-                response = await apiClient.post(`/api/admin/products/sellers/${numericSellerId}`, payload);
-                syncErrorMsg = null;
-              } catch (adminErr) {
-                syncErrorMsg = `HTTP ${sellerErr.response?.status || 403}: Backend access denied (${sellerErr.response?.statusText || 'Forbidden'}). Ensure seller role is enabled in Spring Boot.`;
-                console.warn('Backend product creation notice:', adminErr?.message || prodErr?.message || sellerErr?.message);
-              }
-            } else {
-              console.warn('Backend product creation notice:', prodErr?.message || sellerErr?.message);
-            }
-          }
-        }
+        const response = await apiClient.post('/api/seller/products', cleanApiPayload);
         createdItem = response?.data?.data || response?.data?.product || response?.data;
         if (createdItem) {
           const rawId = createdItem.productId ?? createdItem.id;
@@ -1291,13 +1263,16 @@ export const sellerProductService = {
             isLiveBackend: true,
           });
         }
-
-        if (syncErrorMsg) {
-          throw new Error(syncErrorMsg);
+      } catch (sellerErr) {
+        const errData = sellerErr.response?.data;
+        let msg = errData?.message || errData?.error;
+        if (errData?.errors && Array.isArray(errData.errors)) {
+          msg = errData.errors.map((e) => e.defaultMessage || e.message || e).join(', ');
         }
-      } catch (apiError) {
-        const errorDetail = apiError?.response?.data?.message || apiError?.response?.data?.error || apiError.message || syncErrorMsg || 'Failed to create product in backend database';
-        throw new Error(errorDetail);
+        if (!msg && typeof errData === 'string') msg = errData;
+        if (!msg) msg = sellerErr.message || `HTTP ${sellerErr.response?.status || 'Error'}`;
+        console.error('Backend POST /api/seller/products error details:', errData || sellerErr.message);
+        throw new Error(msg);
       }
     }
 
@@ -1517,27 +1492,43 @@ export const sellerProductService = {
     // Never send sellerId or storeId - backend identifies seller from token
     const { sellerId: _s, vendorId: _v, storeId: _st, ...apiUpdatePayload } = payload;
 
+    // Strictly match com.hinchmart.dto schema on updates
+    const cleanUpdatePayload = {
+      title: title ? title.trim() : undefined,
+      brandId: Number.isInteger(Number(brandId)) && Number(brandId) > 0 ? Number(brandId) : undefined,
+      unit: validUnit,
+      price: price,
+      sellingPrice: updates.sellingPrice !== undefined ? Number(updates.sellingPrice) : price,
+      mrp: updates.mrp !== undefined ? Number(updates.mrp) : mrp,
+      sku: updates.sku ? String(updates.sku).trim() : undefined,
+      description: updates.description !== undefined ? String(updates.description).trim() : undefined,
+      categoryId: catId ? Number(catId) : undefined,
+      subcategoryId: subId ? Number(subId) : undefined,
+      stockQty: parsedStock,
+      moq: parsedMoq,
+      is24HourDelivery: updates.is24HourDelivery !== undefined ? Boolean(updates.is24HourDelivery) : undefined,
+      images: (Array.isArray(images) ? images : []).filter(img => typeof img === 'string' && (img.startsWith('http://') || img.startsWith('https://'))),
+      specifications: cleanSpecs,
+      bulkPricingTiers: updates.bulkPricingTiers,
+    };
+
+    if (parsedThickness !== undefined && parsedThickness !== null) cleanUpdatePayload.thicknessMm = parsedThickness;
+    if (parsedLength !== undefined && parsedLength !== null) cleanUpdatePayload.lengthMm = parsedLength;
+    if (parsedWidth !== undefined && parsedWidth !== null) cleanUpdatePayload.widthMm = parsedWidth;
+    if (parsedHeight !== undefined && parsedHeight !== null) cleanUpdatePayload.heightMm = parsedHeight;
+    if (parsedWeightKg !== undefined && parsedWeightKg !== null) cleanUpdatePayload.weightKg = parsedWeightKg;
+    if (parsedWeightGrams !== undefined && parsedWeightGrams !== null) cleanUpdatePayload.weightGrams = parsedWeightGrams;
+
     let createdItem = null;
     if (!USE_MOCK_API) {
       try {
-        let response = null;
-        try {
-          response = await apiClient.put(`/api/seller/products/${id}`, apiUpdatePayload);
-        } catch (putErr) {
-          try {
-            response = await apiClient.put(`/api/products/${id}`, apiUpdatePayload);
-          } catch (pErr) {
-            // When PUT fails, submit as fresh product via POST /api/seller/products
-            try {
-              response = await apiClient.post('/api/seller/products', apiUpdatePayload);
-            } catch (postErr) {
-              console.warn('Backend POST /api/seller/products notice:', postErr?.response?.data || postErr.message);
-            }
-          }
-        }
+        const response = await apiClient.put(`/api/seller/products/${id}`, cleanUpdatePayload);
         createdItem = response?.data?.data || response?.data?.product || response?.data;
-      } catch (apiError) {
-        console.warn('API updateProduct notice:', apiError?.response?.data || apiError.message);
+      } catch (putErr) {
+        const errData = putErr.response?.data;
+        let msg = errData?.message || errData?.error || putErr.message;
+        console.error('Backend PUT /api/seller/products/{id} error details:', errData || putErr.message);
+        throw new Error(msg);
       }
     }
 
