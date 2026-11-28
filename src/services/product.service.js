@@ -64,6 +64,46 @@ export function normalizeProductItem(p) {
   };
 }
 
+function buildSuggestionsFromProducts(products, cleanQuery) {
+  const q = cleanQuery.toLowerCase();
+  const normalized = (products || []).map((p) => normalizeProductItem(p)).filter(Boolean);
+  const suggestions = [];
+
+  normalized
+    .filter(
+      (p) =>
+        p.name?.toLowerCase().includes(q) ||
+        p.sku?.toLowerCase().includes(q) ||
+        p.brand?.toLowerCase().includes(q) ||
+        normalized.length <= 8
+    )
+    .slice(0, 5)
+    .forEach((p) => {
+      suggestions.push({
+        type: 'PRODUCT',
+        id: p.id,
+        title: p.name,
+        subtitle: `₹${Number(p.price || 0).toLocaleString('en-IN')} / ${p.unit || 'Unit'}`,
+        link: `/seller/products/${p.id}`,
+      });
+    });
+
+  const matchingBrands = [...new Set(normalized.map((p) => p.brand).filter(Boolean))]
+    .filter((b) => b.toLowerCase().includes(q) || normalized.length <= 8)
+    .slice(0, 3);
+  matchingBrands.forEach((b, idx) => {
+    suggestions.push({
+      type: 'BRAND',
+      id: `brand_${idx}`,
+      title: b,
+      subtitle: 'Matching Brand',
+      link: `/seller/products?brand=${encodeURIComponent(b)}`,
+    });
+  });
+
+  return suggestions;
+}
+
 export const productService = {
   /**
    * 1. GET /api/products with multi-level filtering
@@ -191,7 +231,7 @@ export const productService = {
   },
 
   /**
-   * 2. GET /api/products/search-suggestions?query={searchQuery}
+   * 2. Search Suggestions derived from live GET /api/products?search={query}
    */
   async getSearchSuggestions(query) {
     if (!query || query.trim().length === 0) return [];
@@ -200,51 +240,27 @@ export const productService = {
 
     if (!USE_MOCK_API) {
       try {
-        const response = await apiClient.get('/api/products/search-suggestions', {
-          params: { query: cleanQuery },
+        const response = await apiClient.get('/api/products', {
+          params: { search: cleanQuery, limit: 8 },
         });
-        const data = response.data?.data || response.data;
-        if (Array.isArray(data)) {
-          return data;
-        }
+        const raw = response.data?.data ?? response.data;
+        const list = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw?.content)
+          ? raw.content
+          : Array.isArray(raw?.products)
+          ? raw.products
+          : [];
+        return buildSuggestionsFromProducts(list, cleanQuery);
       } catch (apiError) {
         console.warn('Backend search suggestions API notice:', apiError.message);
+        return [];
       }
     }
 
     // Fallback Local Suggestions
     await delay(100);
-    const q = cleanQuery.toLowerCase();
-    const products = (db.getProducts() || []).map(p => normalizeProductItem(p));
-    const suggestions = [];
-
-    // Check matching products
-    products
-      .filter(p => p.name?.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q) || p.brand?.toLowerCase().includes(q))
-      .slice(0, 5)
-      .forEach(p => {
-        suggestions.push({
-          type: 'PRODUCT',
-          id: p.id,
-          title: p.name,
-          subtitle: `₹${Number(p.price || 0).toLocaleString('en-IN')} / ${p.unit || 'Unit'}`,
-          link: `/seller/products/${p.id}`,
-        });
-      });
-
-    // Check matching brands
-    const matchingBrands = [...new Set(products.map(p => p.brand).filter(Boolean))].filter(b => b.toLowerCase().includes(q)).slice(0, 3);
-    matchingBrands.forEach((b, idx) => {
-      suggestions.push({
-        type: 'BRAND',
-        id: `brand_${idx}`,
-        title: b,
-        subtitle: 'in Construction Materials',
-        link: `/seller/products?brand=${encodeURIComponent(b)}`,
-      });
-    });
-
-    return suggestions;
+    return buildSuggestionsFromProducts(db.getProducts() || [], cleanQuery);
   },
 
   /**

@@ -38,10 +38,18 @@ export function usePricing() {
       queryClient.invalidateQueries({ queryKey: ['pricing'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['seller-products'] });
+      const count = res?.modifiedCount ?? res?.totalUpdated ?? 0;
       addToast({
         title: 'Bulk Pricing Applied',
-        message: `Successfully adjusted pricing for ${res.modifiedCount} products`,
+        message: `Successfully adjusted pricing for ${count} products`,
         type: 'success',
+      });
+    },
+    onError: (err) => {
+      addToast({
+        title: 'Bulk Pricing Failed',
+        message: err?.message || 'Unable to apply bulk pricing adjustment',
+        type: 'error',
       });
     },
   });

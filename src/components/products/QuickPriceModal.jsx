@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import { Input } from '../common/Input';
 import { Button } from '../common/Button';
@@ -9,6 +9,14 @@ export function QuickPriceModal({ isOpen, onClose, product, onSave }) {
   const [mrp, setMrp] = useState(product?.mrp || '');
   const [wholesalePrice, setWholesalePrice] = useState(product?.wholesalePrice || '');
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (product && isOpen) {
+      setSellingPrice(product.sellingPrice ?? product.price ?? '');
+      setMrp(product.mrp ?? '');
+      setWholesalePrice(product.wholesalePrice ?? product.sellingPrice ?? '');
+    }
+  }, [product, isOpen]);
 
   if (!product) return null;
 
@@ -99,6 +107,14 @@ export function QuickStockModal({ isOpen, onClose, product, onSave }) {
   const [reason, setReason] = useState('New Production Batch Received');
   const [isLoading, setIsLoading] = useState(false);
 
+  useEffect(() => {
+    if (product && isOpen) {
+      setAdjustmentType('add');
+      setQuantity(100);
+      setReason('New Production Batch Received');
+    }
+  }, [product, isOpen]);
+
   if (!product) return null;
 
   const handleSave = async (e) => {
@@ -108,6 +124,7 @@ export function QuickStockModal({ isOpen, onClose, product, onSave }) {
       await onSave(product.id, {
         adjustmentType,
         quantity: Number(quantity),
+        currentStock: Number(product.stock ?? product.stockQty ?? 0),
         reason,
       });
       onClose();

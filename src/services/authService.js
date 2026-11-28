@@ -4,7 +4,7 @@ import {
   createUserWithEmailAndPassword,
   signOut,
 } from '../firebase/firebaseConfig.js';
-import { apiClient, delay, USE_MOCK_API, hasValidLiveAuth } from './apiClient.js';
+import { apiClient, delay, USE_MOCK_API, hasValidLiveAuth, resolveLiveBackendToken } from './apiClient.js';
 import { db } from '../mock/db.js';
 import { formatNameFromEmail } from '../utils/formatters.js';
 

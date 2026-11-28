@@ -132,9 +132,7 @@ export const sellerService = {
           formData.append('file', new Blob(['Statutory document content'], { type: 'text/plain' }), docData.fileName || docData.name || `${docType.toLowerCase()}.pdf`);
         }
 
-        const response = await apiClient.post('/api/seller/documents', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        const response = await apiClient.post('/api/seller/documents', formData);
         const data = response.data?.data || response.data;
         if (data) return data;
       } catch (apiErr) {

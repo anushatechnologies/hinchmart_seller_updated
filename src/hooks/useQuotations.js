@@ -22,6 +22,13 @@ export function useQuotations(filters = {}) {
         type: 'success',
       });
     },
+    onError: (err) => {
+      addToast({
+        title: 'Failed to Create Quotation',
+        message: err?.message || 'Unable to submit quotation proposal',
+        type: 'error',
+      });
+    },
   });
 
   const updateMutation = useMutation({
@@ -34,6 +41,13 @@ export function useQuotations(filters = {}) {
         type: 'success',
       });
     },
+    onError: (err) => {
+      addToast({
+        title: 'Update Failed',
+        message: err?.message || 'Unable to update quotation',
+        type: 'error',
+      });
+    },
   });
 
   const deleteMutation = useMutation({
@@ -44,6 +58,13 @@ export function useQuotations(filters = {}) {
         title: 'Quotation Deleted',
         message: 'Quotation removed',
         type: 'info',
+      });
+    },
+    onError: (err) => {
+      addToast({
+        title: 'Delete Failed',
+        message: err?.message || 'Unable to delete quotation',
+        type: 'error',
       });
     },
   });

@@ -1,4 +1,4 @@
-import { apiClient, delay, canAccessSellerApi } from './apiClient.js';
+import { apiClient, delay, USE_MOCK_API, canAccessSellerApi, markSellerApiForbidden } from './apiClient.js';
 import { db } from '../mock/db.js';
 import { sellerProductService } from './sellerProduct.service.js';
 
@@ -11,15 +11,16 @@ export const inventoryService = {
       products = null;
     }
     if (!Array.isArray(products)) {
-      products = db.getSellerProducts();
+      products = USE_MOCK_API ? db.getSellerProducts() : [];
     }
 
     const warehouses = await this.getWarehouses();
 
     let list = (Array.isArray(products) ? products : []).map((p) => {
-      const wh = warehouses.find(
-        (w) => String(w.id) === String(p.warehouseId) || String(w.warehouseId) === String(p.warehouseId)
-      ) || warehouses[0];
+      const wh =
+        warehouses.find(
+          (w) => String(w.id) === String(p.warehouseId) || String(w.warehouseId) === String(p.warehouseId)
+        ) || warehouses[0];
       const stock = Number(p.stock ?? p.stockQty ?? 0);
       const lowStockThreshold = Number(p.lowStockThreshold ?? 10);
       const isLowStock = stock > 0 && stock <= lowStockThreshold;
@@ -36,13 +37,13 @@ export const inventoryService = {
         brand: p.brand || p.brandName || '',
         unit: p.unit || 'PIECE',
         availableStock: stock,
-        stock: stock,
+        stock,
         reservedStock: Number(p.reservedStock || 0),
         lowStockThreshold,
         price,
         sellingPrice: price,
         mrp: Number(p.mrp || price),
-        warehouseName: wh ? wh.name : 'Central Logistics Yard',
+        warehouseName: wh ? wh.name : 'Primary Seller Hub',
         warehouseId: p.warehouseId || wh?.id || 'wh_1',
         isLowStock,
         isOutOfStock,
@@ -74,7 +75,6 @@ export const inventoryService = {
   },
 
   async getStockAlerts() {
-    await delay(100);
     const inventory = await this.getInventory();
     const lowStock = inventory.filter((p) => p.isLowStock && p.availableStock > 0);
     const outOfStock = inventory.filter((p) => p.isOutOfStock || p.availableStock === 0);
@@ -89,10 +89,29 @@ export const inventoryService = {
   },
 
   async updateStock(productId, adjustment) {
-    await delay(150);
+    const cleanProductId = String(productId).replace(/^sp_/, '').trim();
+    let currentProd = db.findProductById(productId) || db.getSellerProductById(null, productId);
 
-    const currentProd = db.findProductById(productId) || db.getSellerProductById(null, productId);
-    const oldStock = currentProd ? Number(currentProd.stock ?? currentProd.stockQty ?? 0) : 0;
+    let oldStock =
+      typeof adjustment === 'object' && adjustment !== null && adjustment.currentStock !== undefined
+        ? Number(adjustment.currentStock)
+        : typeof adjustment === 'object' && adjustment !== null && adjustment.oldStock !== undefined
+        ? Number(adjustment.oldStock)
+        : currentProd
+        ? Number(currentProd.stock ?? currentProd.stockQty ?? 0)
+        : null;
+
+    if (oldStock === null && !USE_MOCK_API) {
+      try {
+        const liveProd = await sellerProductService.getSellerProductById(cleanProductId);
+        if (liveProd) {
+          currentProd = liveProd;
+          oldStock = Number(liveProd.stock ?? liveProd.stockQty ?? 0);
+        }
+      } catch (_) {}
+    }
+
+    const baseStock = Number.isFinite(oldStock) ? oldStock : 0;
 
     let newStock;
     let reason = 'Manual Stock Adjustment';
@@ -103,65 +122,86 @@ export const inventoryService = {
       reason = adjustment.reason || reason;
       const adjustQty = Number(adjustment.quantity) || 0;
       if (adjustment.adjustmentType === 'add') {
-        newStock = oldStock + adjustQty;
+        newStock = baseStock + adjustQty;
         qty = adjustQty;
         normType = 'RESTOCK';
       } else if (adjustment.adjustmentType === 'subtract') {
-        newStock = Math.max(0, oldStock - adjustQty);
+        newStock = Math.max(0, baseStock - adjustQty);
         qty = adjustQty;
         normType = 'DAMAGED';
       } else if (adjustment.adjustmentType === 'set') {
         newStock = Math.max(0, adjustQty);
-        qty = Math.abs(newStock - oldStock);
-        normType = newStock >= oldStock ? 'RESTOCK' : 'DAMAGED';
+        qty = newStock;
+        normType = newStock >= baseStock ? 'RESTOCK' : 'DAMAGED';
       } else {
         newStock = Number(adjustment.newStock ?? adjustment.stock ?? adjustQty);
-        qty = Math.abs(newStock - oldStock);
-        normType = newStock >= oldStock ? 'RESTOCK' : 'DAMAGED';
+        qty = Math.abs(newStock - baseStock);
+        normType = newStock >= baseStock ? 'RESTOCK' : 'DAMAGED';
       }
     } else {
       newStock = parseInt(adjustment, 10);
-      qty = Math.abs(newStock - oldStock);
-      normType = newStock >= oldStock ? 'RESTOCK' : 'DAMAGED';
+      qty = Math.abs(newStock - baseStock);
+      normType = newStock >= baseStock ? 'RESTOCK' : 'DAMAGED';
     }
 
     if (isNaN(newStock) || newStock < 0) {
       throw new Error('Stock quantity must be a non-negative number');
     }
 
-    const adjustType = adjustment?.adjustmentType === 'add'
-      ? 'add'
-      : adjustment?.adjustmentType === 'subtract'
-      ? 'subtract'
-      : 'replace';
+    if (!USE_MOCK_API) {
+      let stockSaved = false;
+      let lastError = null;
 
-    // 1. Direct stock update: PATCH /api/seller/products/{id}/stock
-    try {
-      await apiClient.patch(`/api/seller/products/${productId}/stock`, { stockQty: newStock });
-    } catch (_) {}
+      // 1. Direct stock update: PATCH /api/seller/products/{id}/stock
+      if (canAccessSellerApi('/api/seller/products')) {
+        try {
+          await apiClient.patch(`/api/seller/products/${cleanProductId}/stock`, { stockQty: newStock });
+          stockSaved = true;
+        } catch (err) {
+          lastError = err;
+        }
+      }
 
-    // 2. Inventory adjust ledger: POST /api/seller/inventory/adjust
-    if (canAccessSellerApi('/api/seller/inventory/adjust')) {
-      try {
-        await apiClient.post('/api/seller/inventory/adjust', {
-          productId: Number(productId) || productId,
-          warehouseId: Number(adjustment?.warehouseId) || 1,
-          adjustmentType: adjustment?.adjustmentType || (adjustType === 'replace' ? 'set' : adjustType),
-          quantity: qty,
-          reason: reason,
-        });
-      } catch (apiErr) {
-        // Fallback gracefully
+      // 2. Inventory adjust ledger: POST /api/seller/inventory/adjust
+      if (canAccessSellerApi('/api/seller/inventory/adjust')) {
+        try {
+          const adjustType =
+            typeof adjustment === 'object' && adjustment?.adjustmentType
+              ? adjustment.adjustmentType
+              : 'set';
+          await apiClient.post('/api/seller/inventory/adjust', {
+            productId: Number(cleanProductId) || cleanProductId,
+            warehouseId: Number(adjustment?.warehouseId) || 1,
+            adjustmentType: adjustType,
+            quantity: adjustType === 'set' ? newStock : qty,
+            stockQty: newStock,
+            reason,
+          });
+          stockSaved = true;
+        } catch (apiErr) {
+          if (apiErr?.response?.status === 403) {
+            markSellerApiForbidden('/api/seller/inventory/adjust');
+          }
+          if (!lastError) lastError = apiErr;
+        }
+      }
+
+      if (!stockSaved && lastError) {
+        throw new Error(
+          lastError?.response?.data?.message || lastError?.message || 'Failed to update stock balance on backend.'
+        );
       }
     }
 
-    db.updateSellerStock(null, productId, newStock);
+    try {
+      db.updateSellerStock(null, productId, newStock);
+    } catch (_) {}
 
     const updated = db.findProductById(productId) || db.getSellerProductById(null, productId);
 
     return {
-      id: productId,
-      productId,
+      id: cleanProductId,
+      productId: cleanProductId,
       name: updated?.title || updated?.name || currentProd?.title || currentProd?.name || 'Product',
       stock: newStock,
       unit: updated?.unit || currentProd?.unit || 'PIECE',
@@ -179,21 +219,25 @@ export const inventoryService = {
    * 3.1 GET /api/seller/warehouses
    */
   async getWarehouses() {
-    if (canAccessSellerApi('/api/seller/warehouses')) {
+    if (!USE_MOCK_API && canAccessSellerApi('/api/seller/warehouses')) {
       try {
         const response = await apiClient.get('/api/seller/warehouses');
         const rawList = response.data?.data || response.data;
         if (Array.isArray(rawList)) {
-          return rawList.map(w => ({
+          return rawList.map((w) => ({
             ...w,
             id: w.id || `wh_${w.warehouseId || 1}`,
             warehouseId: w.warehouseId ?? w.id,
           }));
         }
       } catch (apiErr) {
-        // Fallback gracefully
+        if (apiErr?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/warehouses');
+        }
       }
     }
+
+    if (!USE_MOCK_API) return [];
 
     await delay(50);
     return db.getWarehouses();
@@ -203,13 +247,19 @@ export const inventoryService = {
    * 3.2 POST /api/seller/warehouses
    */
   async createWarehouse(whData) {
-    if (canAccessSellerApi('/api/seller/warehouses')) {
+    if (!USE_MOCK_API) {
+      if (!canAccessSellerApi('/api/seller/warehouses')) {
+        throw new Error('Warehouse management is restricted until seller verification completes.');
+      }
       try {
         const response = await apiClient.post('/api/seller/warehouses', whData);
         const data = response.data?.data || response.data;
         if (data) return data;
       } catch (apiErr) {
-        // Fallback gracefully
+        if (apiErr?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/warehouses');
+        }
+        throw new Error(apiErr?.response?.data?.message || apiErr?.message || 'Failed to create warehouse.');
       }
     }
 
@@ -218,12 +268,37 @@ export const inventoryService = {
   },
 
   async updateWarehouse(id, updates) {
+    const cleanId = String(id).replace(/^wh_/, '').trim();
+    if (!USE_MOCK_API && canAccessSellerApi('/api/seller/warehouses')) {
+      try {
+        const response = await apiClient.put(`/api/seller/warehouses/${cleanId}`, updates);
+        const data = response.data?.data || response.data;
+        if (data) return data;
+      } catch (apiErr) {
+        if (apiErr?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/warehouses');
+        }
+        throw new Error(apiErr?.response?.data?.message || apiErr?.message || 'Failed to update warehouse.');
+      }
+    }
     await delay(150);
     return db.updateWarehouse(id, updates);
   },
 
   async deleteWarehouse(id) {
+    const cleanId = String(id).replace(/^wh_/, '').trim();
+    if (!USE_MOCK_API && canAccessSellerApi('/api/seller/warehouses')) {
+      try {
+        await apiClient.delete(`/api/seller/warehouses/${cleanId}`);
+        return true;
+      } catch (apiErr) {
+        if (apiErr?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/warehouses');
+        }
+        throw new Error(apiErr?.response?.data?.message || apiErr?.message || 'Failed to delete warehouse.');
+      }
+    }
     await delay(150);
     return db.deleteWarehouse(id);
-  }
+  },
 };

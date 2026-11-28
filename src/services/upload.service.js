@@ -110,7 +110,7 @@ export const uploadService = {
    */
   async uploadMultipleProductImages(files, onProgress) {
     if (!files || !files.length) return [];
-    if (!USE_MOCK_API) {
+    if (!USE_MOCK_API && canAccessSellerApi('/api/images/multiple')) {
       try {
         const formData = new FormData();
         Array.from(files).forEach((f) => formData.append('files', f));
@@ -125,6 +125,10 @@ export const uploadService = {
             },
           });
         } catch (err1) {
+          if (err1?.response?.status === 403) {
+            markSellerApiForbidden('/api/images/multiple');
+            throw err1;
+          }
           res = await apiClient.post('/api/images/multiple', formData, {
             timeout: 45000,
             onUploadProgress: (e) => {
@@ -141,7 +145,11 @@ export const uploadService = {
           return data.files.map((d) => d?.imageUrl || d?.fileUrl || d?.url || d).filter(Boolean);
         }
       } catch (err) {
-        console.warn('Backend multiple image upload notice:', err?.message);
+        if (err?.response?.status === 403) {
+          markSellerApiForbidden('/api/images/multiple');
+        } else {
+          console.warn('Backend multiple image upload notice:', err?.message);
+        }
       }
     }
 
@@ -194,13 +202,13 @@ export const uploadService = {
 
     const isImage = file.type?.startsWith('image/') || /\.(png|jpe?g|webp|svg)$/i.test(file.name || '');
 
-    if (!USE_MOCK_API) {
+    if (!USE_MOCK_API && canAccessSellerApi('/api/images/upload')) {
       try {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('folder', type);
 
-        const response = await apiClient.post(`/api/images/upload?type=${type}`, formData, {
+        const uploadConfig = {
           timeout: 20000,
           onUploadProgress: (progressEvent) => {
             if (onProgress && progressEvent.total) {
@@ -208,7 +216,26 @@ export const uploadService = {
               onProgress(percentCompleted);
             }
           },
-        });
+        };
+
+        let response;
+        try {
+          response = await apiClient.post(
+            `/api/images/upload?folder=${encodeURIComponent(type)}`,
+            formData,
+            uploadConfig
+          );
+        } catch (err1) {
+          if (err1?.response?.status === 403) {
+            markSellerApiForbidden('/api/images/upload');
+            throw err1;
+          }
+          response = await apiClient.post(
+            `/api/images/upload?type=${encodeURIComponent(type)}`,
+            formData,
+            uploadConfig
+          );
+        }
 
         const data = response.data?.data || response.data;
         const imageUrl = data?.imageUrl || data?.fileUrl || data?.url;
@@ -228,7 +255,9 @@ export const uploadService = {
           };
         }
       } catch (err) {
-        // Fallback
+        if (err?.response?.status === 403) {
+          markSellerApiForbidden('/api/images/upload');
+        }
       }
     }
 

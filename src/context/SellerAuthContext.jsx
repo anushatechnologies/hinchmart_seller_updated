@@ -32,19 +32,39 @@ export const SellerAuthProvider = ({ children }) => {
     const syncPromise = (async () => {
       try {
         const token = await firebaseUser.getIdToken();
+        const previousUid =
+          typeof localStorage !== 'undefined' ? localStorage.getItem('hinchmart_seller_uid') : null;
+        const uidChanged = Boolean(previousUid && previousUid !== firebaseUser.uid);
+        if (uidChanged && typeof localStorage !== 'undefined') {
+          [
+            'hinchmart_seller_token',
+            'accessToken',
+            'sellerToken',
+            'authToken',
+            'token',
+            'hinchmart_seller_id',
+            'sellerId',
+            'seller_role',
+            'seller_onboarding_status',
+            'seller_approved',
+          ].forEach((k) => localStorage.removeItem(k));
+        }
+
         let profile = null;
 
         try {
           const response = await apiClient.post(
             '/api/auth/sync',
             {
+              firebaseIdToken: token,
+              role: 'SELLER',
               name: extraData.name || firebaseUser.displayName || 'Authorized Seller',
               phone: extraData.phone || firebaseUser.phoneNumber || '',
               email: firebaseUser.email,
             },
             {
               headers: { Authorization: `Bearer ${token}` },
-              timeout: 3500,
+              timeout: 15000,
             }
           );
           profile = response.data?.data || response.data;
@@ -63,29 +83,52 @@ export const SellerAuthProvider = ({ children }) => {
           }
         }
 
-        // If backend responded, use profile; otherwise preserve authenticated seller ID
-        const existingStoredId = typeof localStorage !== 'undefined' ? localStorage.getItem('sellerId') : null;
-        const authUserId = db.getAuth()?.user?.sellerId || db.getAuth()?.user?.id;
-        const cleanSellerId = profile?.sellerId || existingStoredId || authUserId || db.getSeller()?.id || (firebaseUser.phoneNumber ? firebaseUser.phoneNumber.replace(/\D/g, '').slice(-10) : (firebaseUser.email ? firebaseUser.email.split('@')[0] : null));
+        const syncedAccessToken = profile?.accessToken || profile?.token;
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('hinchmart_seller_uid', firebaseUser.uid);
+          if (syncedAccessToken) {
+            localStorage.setItem('hinchmart_seller_token', syncedAccessToken);
+            localStorage.setItem('accessToken', syncedAccessToken);
+            localStorage.setItem('sellerToken', syncedAccessToken);
+            localStorage.setItem('authToken', syncedAccessToken);
+          }
+        }
+
+        // If backend responded, use profile; otherwise preserve authenticated seller ID for same UID
+        const existingStoredId =
+          !uidChanged && typeof localStorage !== 'undefined'
+            ? localStorage.getItem('sellerId') || localStorage.getItem('hinchmart_seller_id')
+            : null;
+        const authUserId = !uidChanged ? db.getAuth()?.user?.sellerId || db.getAuth()?.user?.id : null;
+        const cleanSellerId = profile?.sellerId || existingStoredId || authUserId || null;
         const cleanRole = profile?.role || (cleanSellerId ? 'SELLER' : 'CUSTOMER');
 
-        const existingStoredStatus = typeof localStorage !== 'undefined' ? localStorage.getItem('seller_onboarding_status') : null;
-        const isApprovedStored = typeof localStorage !== 'undefined' && localStorage.getItem('seller_approved') === 'true';
-        const isPendingStored = typeof localStorage !== 'undefined' && (localStorage.getItem('seller_approved') === 'false' || existingStoredStatus === 'PENDING');
+        const existingStoredStatus =
+          !uidChanged && typeof localStorage !== 'undefined'
+            ? localStorage.getItem('seller_onboarding_status')
+            : null;
+        const isApprovedStored =
+          !uidChanged && typeof localStorage !== 'undefined' && localStorage.getItem('seller_approved') === 'true';
+        const isPendingStored =
+          !uidChanged &&
+          typeof localStorage !== 'undefined' &&
+          (localStorage.getItem('seller_approved') === 'false' || existingStoredStatus === 'PENDING');
 
         let calculatedStatus = 'PENDING';
         if (profile?.onboardingStatus) {
           calculatedStatus = profile.onboardingStatus;
+        } else if (cleanRole === 'CUSTOMER' && !profile?.sellerId) {
+          calculatedStatus = 'PENDING';
         } else if (isApprovedStored) {
           calculatedStatus = 'VERIFIED';
         } else if (isPendingStored) {
           calculatedStatus = 'PENDING';
-        } else if (cleanSellerId) {
+        } else if (profile?.sellerId) {
           calculatedStatus = 'VERIFIED';
         }
 
         const resolvedProfile = {
-          userId: profile?.userId || 104,
+          userId: profile?.userId || profile?.id || 104,
           role: cleanRole,
           sellerId: cleanSellerId,
           firebaseUid: firebaseUser.uid,
@@ -107,21 +150,21 @@ export const SellerAuthProvider = ({ children }) => {
         } else {
           localStorage.removeItem('hinchmart_seller_id');
           localStorage.removeItem('sellerId');
-          localStorage.removeItem('seller_role');
-          localStorage.removeItem('seller_onboarding_status');
+          localStorage.setItem('seller_role', resolvedProfile.role);
+          localStorage.setItem('seller_onboarding_status', resolvedProfile.onboardingStatus);
         }
 
         // Sync local mock DB state for offline support
         db.setAuth({
           isAuthenticated: true,
           user: {
-            id: resolvedProfile.sellerId,
+            id: resolvedProfile.sellerId || resolvedProfile.userId,
             sellerId: resolvedProfile.sellerId,
             name: resolvedProfile.name,
             email: resolvedProfile.email,
             role: resolvedProfile.role,
           },
-          token,
+          token: syncedAccessToken || undefined,
         });
 
         return resolvedProfile;
@@ -229,9 +272,19 @@ export const SellerAuthProvider = ({ children }) => {
   // Logout
   const logout = async () => {
     await signOut(auth);
-    localStorage.removeItem('sellerId');
-    localStorage.removeItem('seller_role');
-    localStorage.removeItem('seller_onboarding_status');
+    [
+      'hinchmart_seller_uid',
+      'hinchmart_seller_token',
+      'accessToken',
+      'sellerToken',
+      'authToken',
+      'token',
+      'hinchmart_seller_id',
+      'sellerId',
+      'seller_role',
+      'seller_onboarding_status',
+      'seller_approved',
+    ].forEach((k) => localStorage.removeItem(k));
     resetSellerApiPermissions();
     setUser(null);
     setSellerProfile(null);

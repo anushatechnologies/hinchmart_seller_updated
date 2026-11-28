@@ -1,4 +1,4 @@
-import { apiClient, delay, USE_MOCK_API, hasValidLiveAuth, canAccessSellerApi } from './api.js';
+import { apiClient, delay, USE_MOCK_API, hasValidLiveAuth, canAccessSellerApi, markSellerApiForbidden } from './apiClient.js';
 import { db } from '../mock/db.js';
 import { getCategoryImage, getSubcategoryImage, getBrandLogo } from '../utils/productImages.js';
 
@@ -705,6 +705,13 @@ export const categoryService = {
             }
           } catch (_) {}
         }
+              if (!realBrandId) {
+          throw new Error(
+            apiError?.response?.data?.message ||
+              apiError?.message ||
+              'Failed to create brand on backend.'
+          );
+        }
       }
     }
 
@@ -770,6 +777,13 @@ export const categoryService = {
               createdItem = existing;
             }
           } catch (_) {}
+        }
+              if (!realCatId) {
+          throw new Error(
+            apiError?.response?.data?.message ||
+              apiError?.message ||
+              'Failed to create category on backend.'
+          );
         }
       }
     }
@@ -842,6 +856,13 @@ export const categoryService = {
               createdItem = existing;
             }
           } catch (_) {}
+        }
+              if (!realSubId) {
+          throw new Error(
+            apiError?.response?.data?.message ||
+              apiError?.message ||
+              'Failed to create subcategory on backend.'
+          );
         }
       }
     }
@@ -1044,7 +1065,10 @@ export const categoryService = {
         const response = await apiClient.post('/api/seller/category-requests', payload);
         return response.data?.data || response.data;
       } catch (err) {
-        console.warn('API submitCategoryRequest notice:', err?.response?.data || err.message);
+        if (err?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/category-requests');
+        }
+        throw new Error(err?.response?.data?.message || err?.message || 'Failed to submit category request.');
       }
     }
 
@@ -1062,13 +1086,15 @@ export const categoryService = {
    * 16. GET /api/seller/category-requests (List My Category Requests)
    */
   async getCategoryRequests() {
-    if (!USE_MOCK_API) {
+    if (!USE_MOCK_API && canAccessSellerApi('/api/seller/category-requests')) {
       try {
         const response = await apiClient.get('/api/seller/category-requests');
         const list = response.data?.data || response.data;
         if (Array.isArray(list)) return list;
       } catch (err) {
-        // Fallback
+        if (err?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/category-requests');
+        }
       }
     }
 

@@ -21,6 +21,13 @@ export function useEnquiries(filters = {}) {
         type: 'success',
       });
     },
+    onError: (err) => {
+      addToast({
+        title: 'Update Failed',
+        message: err?.message || 'Unable to update enquiry status',
+        type: 'error',
+      });
+    },
   });
 
   return {

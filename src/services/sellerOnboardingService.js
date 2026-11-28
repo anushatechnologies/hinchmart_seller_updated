@@ -176,9 +176,7 @@ export const sellerOnboardingService = {
 
     if (!USE_MOCK_API) {
       try {
-        const response = await apiClient.post(`/api/seller/onboarding/${activeSellerId}/documents`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        const response = await apiClient.post(`/api/seller/onboarding/${activeSellerId}/documents`, formData);
         const resData = response.data?.data || response.data;
         if (resData) return resData;
       } catch (err) {
@@ -205,16 +203,36 @@ export const sellerOnboardingService = {
    * GET /api/seller/onboarding/{sellerId}/vault
    */
   async getDocumentVault(sellerId) {
-    const activeSellerId = sellerId || 45;
-    if (!USE_MOCK_API && canAccessSellerApi('/api/seller/documents')) {
-      try {
-        const response = await apiClient.get('/api/seller/documents');
-        const resData = response.data?.data || response.data;
-        if (resData?.documents) return resData;
-        if (Array.isArray(resData)) return { documents: resData };
-      } catch (err) {
-        if (err?.response?.status === 403) {
-          markSellerApiForbidden('/api/seller/documents');
+    const cleanNumericMatch = String(sellerId || '').replace(/^seller_/, '').match(/^\d+$/);
+    const activeSellerId = cleanNumericMatch
+      ? cleanNumericMatch[0]
+      : (typeof localStorage !== 'undefined' && (localStorage.getItem('sellerId') || localStorage.getItem('hinchmart_seller_id'))) || '45';
+    if (!USE_MOCK_API) {
+      for (const url of [
+        `/api/seller/onboarding/${activeSellerId}/vault`,
+        `/api/sellers/onboarding/${activeSellerId}/vault`,
+      ]) {
+        try {
+          const response = await apiClient.get(url);
+          const resData = response.data?.data || response.data;
+          if (resData?.documents || Array.isArray(resData)) {
+            return Array.isArray(resData) ? { documents: resData } : resData;
+          }
+        } catch (err) {
+          if (err?.response?.status === 403) break;
+        }
+      }
+
+      if (canAccessSellerApi('/api/seller/documents')) {
+        try {
+          const response = await apiClient.get('/api/seller/documents');
+          const resData = response.data?.data || response.data;
+          if (resData?.documents) return resData;
+          if (Array.isArray(resData)) return { documents: resData };
+        } catch (err) {
+          if (err?.response?.status === 403) {
+            markSellerApiForbidden('/api/seller/documents');
+          }
         }
       }
     }

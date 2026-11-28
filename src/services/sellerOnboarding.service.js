@@ -220,7 +220,7 @@ export function safeNumericSellerId(sellerId) {
       return parsed;
     }
   }
-  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('sellerId') : null;
+  const stored = typeof localStorage !== 'undefined' ? (localStorage.getItem('sellerId') || localStorage.getItem('hinchmart_seller_id')) : null;
   const storedParsed = parseInt(stored, 10);
   if (!isNaN(storedParsed) && storedParsed > 0 && storedParsed <= 2147483647) {
     return storedParsed;
@@ -538,10 +538,12 @@ export const sellerOnboardingService = {
         }
         const data = response.data?.data || response.data;
         if (data) {
+          const obj = typeof data === 'object' ? data : { value: data };
           return {
+            ...obj,
             success: true,
             sellerId: cleanNumericId,
-            data,
+            data: obj,
             message: 'Onboarding summary retrieved successfully',
           };
         }
@@ -633,29 +635,26 @@ export const sellerOnboardingService = {
     const cleanId = normalizeSellerId(sellerId);
     const localSeller = db.getSeller() || {};
 
-    if (!cleanId) {
-      return localSeller;
-    }
-
-    if (localSeller && (localSeller.name || localSeller.companyName || localSeller.email)) {
-      return localSeller;
-    }
-
-    const auth = db.getAuth();
-    if (hasValidLiveAuth() && cleanId) {
-      try {
-        const response = await apiClient.get(`/api/sellers/onboarding/${cleanId}/summary`);
-        const backendData = response.data?.data || response.data;
-        if (backendData && (backendData.name || backendData.companyName || backendData.fullName)) {
-          return {
-            ...localSeller,
-            ...backendData,
-            name: backendData.fullName || backendData.name || localSeller.name,
-            companyName: backendData.companyName || localSeller.companyName,
-          };
+    if (!USE_MOCK_API && hasValidLiveAuth() && cleanId) {
+      for (const url of [
+        `/api/seller/onboarding/${cleanId}/summary`,
+        `/api/sellers/onboarding/${cleanId}/summary`,
+      ]) {
+        try {
+          const response = await apiClient.get(url);
+          const backendData = response.data?.data || response.data;
+          if (backendData && typeof backendData === 'object') {
+            return {
+              ...localSeller,
+              ...backendData,
+              sellerId: backendData.sellerId || Number(cleanId) || cleanId,
+              name: backendData.fullName || backendData.name || localSeller.name,
+              companyName: backendData.companyName || localSeller.companyName,
+            };
+          }
+        } catch (_) {
+          // Try next route
         }
-      } catch (_) {
-        // Return local stored seller profile quietly
       }
     }
 
@@ -669,13 +668,45 @@ export const sellerOnboardingService = {
   async getDocumentVault(sellerId) {
     const cleanId = normalizeSellerId(sellerId);
     let backendDocs = [];
+    let backendVaultMeta = null;
 
-    if (canAccessSellerApi('/api/seller/documents')) {
+    if (!USE_MOCK_API && hasValidLiveAuth() && cleanId) {
+      for (const url of [
+        `/api/seller/onboarding/${cleanId}/vault`,
+        `/api/sellers/onboarding/${cleanId}/vault`,
+      ]) {
+        try {
+          const response = await apiClient.get(url);
+          const rawData = response.data?.data || response.data;
+          const rawList = Array.isArray(rawData)
+            ? rawData
+            : Array.isArray(rawData?.documents)
+            ? rawData.documents
+            : null;
+          if (rawList) {
+            backendDocs = rawList.map((d) => normalizeDocumentItem(d));
+            if (!Array.isArray(rawData) && rawData) {
+              backendVaultMeta = rawData;
+            }
+            break;
+          }
+        } catch (vaultErr) {
+          if (vaultErr?.response?.status === 403) break;
+        }
+      }
+    }
+
+    if (backendDocs.length === 0 && canAccessSellerApi('/api/seller/documents')) {
       try {
         const response = await apiClient.get('/api/seller/documents');
         const rawData = response.data?.data || response.data || [];
-        if (Array.isArray(rawData)) {
-          backendDocs = rawData.map((d) => normalizeDocumentItem(d));
+        const rawList = Array.isArray(rawData)
+          ? rawData
+          : Array.isArray(rawData?.documents)
+          ? rawData.documents
+          : null;
+        if (rawList) {
+          backendDocs = rawList.map((d) => normalizeDocumentItem(d));
         }
       } catch (apiError) {
         if (apiError?.response?.status === 403) {
@@ -715,9 +746,15 @@ export const sellerOnboardingService = {
     return {
       success: true,
       sellerId: cleanId,
-      progressText: `${uploadedCount} of 3 submitted`,
+      progressText: backendVaultMeta?.progressText || `${uploadedCount} of 3 submitted`,
+      overallStatus: backendVaultMeta?.overallStatus,
+      totalRequired: backendVaultMeta?.totalRequired ?? 3,
+      submittedCount: backendVaultMeta?.submittedCount ?? uploadedCount,
+      verifiedCount: backendVaultMeta?.verifiedCount ?? 0,
+      isAllSubmitted: backendVaultMeta?.isAllSubmitted ?? uploadedCount >= 3,
+      isAllVerified: backendVaultMeta?.isAllVerified ?? false,
       documents: mergedDocs,
-      status: uploadedCount >= 3 ? 'UNDER_REVIEW' : 'PENDING',
+      status: backendVaultMeta?.overallStatus || (uploadedCount >= 3 ? 'UNDER_REVIEW' : 'PENDING'),
     };
   },
 
@@ -762,9 +799,16 @@ export const sellerOnboardingService = {
           formData.append('file', new Blob(['Statutory KYC verification document content'], { type: 'text/plain' }), fileName);
         }
 
-        const response = await apiClient.post(`/api/seller/onboarding/${cleanId}/documents`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        let response;
+        try {
+          response = await apiClient.post(`/api/seller/onboarding/${cleanId}/documents`, formData);
+        } catch (e) {
+          if (e?.response?.status === 404) {
+            response = await apiClient.post(`/api/sellers/onboarding/${cleanId}/documents`, formData);
+          } else {
+            throw e;
+          }
+        }
         const resData = response.data?.data || response.data;
         if (resData) {
           const normalized = normalizeDocumentItem(resData, apiDocType);
@@ -861,27 +905,6 @@ export const sellerOnboardingService = {
   },
 
   /**
-   * 10. Fetch Onboarding Summary Details
-   * GET /api/seller/onboarding/{sellerId}/summary
-   */
-  async getOnboardingSummary(sellerId) {
-    const cleanId = safeNumericSellerId(sellerId);
-    if (!USE_MOCK_API) {
-      try {
-        const response = await apiClient.get(`/api/seller/onboarding/${cleanId}/summary`);
-        return response.data?.data || response.data;
-      } catch (err) {
-        console.warn('Live summary endpoint error:', err.message);
-      }
-    }
-    return {
-      sellerId: cleanId,
-      isReadyForSubmission: true,
-      onboardingStatus: 'STEP_3',
-    };
-  },
-
-  /**
    * 11. Final Submission for Admin Verification
    * POST /api/seller/onboarding/{sellerId}/final-submit
    */
@@ -912,11 +935,7 @@ export const sellerOnboardingService = {
  * Clean Numeric Seller ID Resolver (converts strings like 'seller_101' -> '9')
  */
 export function normalizeSellerId(rawId) {
-  if (!rawId) return '9';
-  const str = String(rawId).trim();
-  if (/^\d+$/.test(str)) return str;
-  // If it's a mock string like "seller_101" or "usr_...", return '9'
-  return '9';
+  return String(safeNumericSellerId(rawId));
 }
 
 /**

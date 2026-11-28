@@ -11,6 +11,17 @@ import { uploadService } from './upload.service.js';
  * - "18 × 18 × 6 cm", "2440 x 1220 x 18 mm", "2.4 x 1.2 m", "18mm"
  * - "1.3 kg", "500 g", "1.22", "32.5 kg"
  */
+export function normalizeBackendUnit(rawUnit = 'PIECE') {
+  const validUnit = String(rawUnit || 'PIECE').trim().toUpperCase();
+  if (validUnit === 'PIECES' || validUnit === 'PIECE' || validUnit === 'PCS' || validUnit === 'UNIT') return 'PIECE';
+  if (validUnit === 'SHEETS' || validUnit === 'SHEET') return 'SHEET';
+  if (validUnit === 'METERS' || validUnit === 'METER' || validUnit === 'M' || validUnit.includes('METER')) return 'METER';
+  if (validUnit === 'KGS' || validUnit === 'KG') return 'KG';
+  if (validUnit.includes('BOX')) return 'BOX';
+  if (validUnit.includes('BAG')) return 'BAG';
+  return validUnit || 'PIECE';
+}
+
 export function extractDimensionsFromSpecs(specs = {}, explicitDims = {}) {
   let length = explicitDims.lengthMm ?? explicitDims.length_mm ?? explicitDims.length ?? explicitDims.packedLengthMm ?? explicitDims.packed_length_mm;
   let width = explicitDims.widthMm ?? explicitDims.width_mm ?? explicitDims.width ?? explicitDims.packedWidthMm ?? explicitDims.packed_width_mm;
@@ -314,7 +325,7 @@ export const sellerProductService = {
     const currentAuth = db.getAuth();
     const rawSellerId = storedSellerId || currentAuth?.user?.sellerId || currentAuth?.user?.id || currentSeller?.sellerId || currentSeller?.id;
     if (!rawSellerId) {
-      return { products: [], total: 0, page: 1, limit: 20, totalPages: 0 };
+      return [];
     }
     const cleanId = String(rawSellerId).replace(/^seller_/, '').trim();
     const sellerId = `seller_${cleanId}`;
@@ -1009,14 +1020,15 @@ export const sellerProductService = {
     // 2. Query live backend API for this product to guarantee fresh approval & live catalog status
     if (!USE_MOCK_API) {
       try {
+        const lookupId = cleanIdStr.replace(/^sp_/, '').trim();
         let response = null;
         try {
           // 1. Try dedicated seller endpoint: GET /api/seller/products/{id}
-          response = await apiClient.get(`/api/seller/products/${id}`, { timeout: 3500 });
+          response = await apiClient.get(`/api/seller/products/${lookupId}`, { timeout: 8000 });
         } catch (sellerErr) {
           // 2. Try public catalog endpoint: GET /api/products/{id}
           try {
-            response = await apiClient.get(`/api/products/${id}`, { timeout: 3500 });
+            response = await apiClient.get(`/api/products/${lookupId}`, { timeout: 8000 });
           } catch (err) {
             const status = err?.response?.status || err?.response?.data?.statusCode;
             const msg = err?.response?.data?.message || err?.message || '';
@@ -1034,7 +1046,7 @@ export const sellerProductService = {
           // If query by ID failed with other error and local product has SKU or title, try searching catalog
           if (!response && localProduct?.title) {
             try {
-              const searchRes = await apiClient.get('/api/products', { params: { search: localProduct.title, limit: 5 }, timeout: 3500 });
+              const searchRes = await apiClient.get('/api/products', { params: { search: localProduct.title, limit: 5 }, timeout: 8000 });
               const prods = searchRes.data?.data || searchRes.data || [];
               const items = Array.isArray(prods) ? prods : (prods.products || []);
               const found = items.find(
@@ -1131,15 +1143,7 @@ export const sellerProductService = {
       rawBrandName
     );
 
-    // Ensure unit is valid for Spring Boot enum / validation
-    let validUnit = String(productData.unit || 'PIECE').trim().toUpperCase();
-    if (validUnit === 'PIECES' || validUnit === 'PIECE' || validUnit === 'PCS' || validUnit === 'UNIT') validUnit = 'PIECE';
-    else if (validUnit === 'SHEETS' || validUnit === 'SHEET') validUnit = 'SHEET';
-    else if (validUnit === 'METERS' || validUnit === 'METER' || validUnit === 'M' || validUnit.includes('METER')) validUnit = 'METER';
-    else if (validUnit === 'KGS' || validUnit === 'KG') validUnit = 'KG';
-    else if (validUnit.includes('BOX')) validUnit = 'BOX';
-    else if (validUnit.includes('BAG')) validUnit = 'BAG';
-    else if (!validUnit) validUnit = 'PIECE';
+    const validUnit = normalizeBackendUnit(productData.unit);
 
     const parsedGst = Math.max(0, Math.min(100, parseInt(productData.gstRate ?? productData.gst ?? 18, 10) || 18));
     const parsedMoq = Math.max(1, parseInt(productData.moq || 1, 10) || 1);
@@ -1408,7 +1412,7 @@ export const sellerProductService = {
     const images = Array.isArray(updates.images) && updates.images.length > 0
       ? updates.images
       : (updates.imageUrl ? [updates.imageUrl] : (Array.isArray(localProd.images) && localProd.images.length > 0 ? localProd.images : (localProd.imageUrl ? [localProd.imageUrl] : [])));
-    const validUnit = String(updates.unit || localProd.unit || 'Pieces').trim();
+    const validUnit = normalizeBackendUnit(updates.unit || localProd.unit);
     const parsedGst = Math.max(0, Math.min(100, parseInt(updates.gstRate ?? updates.gst ?? localProd.gstRate ?? localProd.gst ?? 18, 10) || 18));
     const parsedMoq = Math.max(1, parseInt(updates.moq || localProd.moq || 1, 10) || 1);
     const parsedStock = Math.max(0, parseInt(updates.stockQty ?? updates.stock ?? localProd.stockQty ?? localProd.stock ?? 0, 10) || 0);
@@ -1563,6 +1567,8 @@ export const sellerProductService = {
       subcategoryId: subId ? Number(subId) : undefined,
       stockQty: parsedStock,
       moq: parsedMoq,
+      hsnCode: (updates.hsnCode || updates.hsn || localProd.hsnCode || localProd.hsn || '').trim() || undefined,
+      gstRate: parsedGst,
       is24HourDelivery: updates.is24HourDelivery !== undefined ? Boolean(updates.is24HourDelivery) : undefined,
       images: cleanImages,
       specifications: cleanSpecs,
@@ -1646,19 +1652,28 @@ export const sellerProductService = {
     const currentAuth = db.getAuth();
     const rawSellerId = storedSellerId || currentAuth?.user?.sellerId || currentAuth?.user?.id || currentSeller?.sellerId || currentSeller?.id;
     const sellerId = String(rawSellerId || '');
+    const targetId = String(id).replace(/^sp_/, '').trim();
 
     if (!USE_MOCK_API) {
       try {
         let response;
         try {
-          response = await apiClient.put(`/api/seller/products/${id}`, { active });
+          response = await apiClient.put(`/api/seller/products/${targetId}`, { active });
         } catch (e) {
-          response = await apiClient.put(`/api/products/${id}`, { active });
+          response = await apiClient.put(`/api/products/${targetId}`, { active });
         }
         const rawData = response.data?.data || response.data;
-        if (rawData) return normalizeSellerProduct(rawData);
+        if (rawData) {
+          const normalized = normalizeSellerProduct(rawData);
+          try { db.updateSellerProduct(sellerId, id, { active, status: active ? 'APPROVED' : 'INACTIVE' }); } catch (_) {}
+          return normalized;
+        }
       } catch (apiError) {
-        // Fallback
+        throw new Error(
+          apiError?.response?.data?.message ||
+            apiError?.message ||
+            'Failed to update product visibility on backend.'
+        );
       }
     }
 
@@ -1674,16 +1689,17 @@ export const sellerProductService = {
    */
   async updateStock(id, stockQty) {
     const cleanQty = Math.max(0, parseInt(stockQty, 10) || 0);
-    const numericId = Number(id) || id;
+    const targetId = String(id).replace(/^sp_/, '').trim();
+    const numericId = Number(targetId) || targetId;
     if (!USE_MOCK_API) {
       try {
         await apiClient.patch(`/api/seller/products/${numericId}/stock`, { stockQty: cleanQty });
       } catch (err) {
-        console.warn('PATCH /api/seller/products/{id}/stock notice:', err.message);
+        throw new Error(err?.response?.data?.message || err?.message || 'Failed to update stock on backend.');
       }
     }
-    db.updateSellerStock(null, id, cleanQty);
-    return { id, stockQty: cleanQty, stock: cleanQty };
+    try { db.updateSellerStock(null, id, cleanQty); } catch (_) {}
+    return { id: numericId, stockQty: cleanQty, stock: cleanQty };
   },
 
   /**
@@ -1696,28 +1712,31 @@ export const sellerProductService = {
     const currentAuth = db.getAuth();
     const rawSellerId = storedSellerId || currentAuth?.user?.sellerId || currentAuth?.user?.id || currentSeller?.sellerId || currentSeller?.id;
     const sellerId = String(rawSellerId || '');
-    const cleanId = String(id);
+    const cleanId = String(id).replace(/^sp_/, '').trim();
 
-    // 1. Permanently record as deleted so it never re-seeds
-    db.recordDeletedProduct(cleanId);
-
-    // 2. Dispatch DELETE to backend API
     if (!USE_MOCK_API) {
       try {
         try {
-          await apiClient.delete(`/api/products/${cleanId}`);
-        } catch (e) {
           await apiClient.delete(`/api/seller/products/${cleanId}`);
+        } catch (e) {
+          if (e?.response?.status === 404) {
+            await apiClient.delete(`/api/products/${cleanId}`);
+          } else {
+            throw e;
+          }
         }
       } catch (apiError) {
-        console.warn('API deleteProduct notice:', apiError?.response?.data || apiError.message);
+        if (apiError?.response?.status !== 404) {
+          throw new Error(apiError?.response?.data?.message || apiError?.message || 'Failed to delete product.');
+        }
       }
     }
 
+    db.recordDeletedProduct(String(id));
     await delay(50);
     if (USE_MOCK_API) {
-      db.deleteProduct(cleanId);
-      db.deleteSellerProduct(sellerId, cleanId);
+      db.deleteProduct(String(id));
+      db.deleteSellerProduct(sellerId, String(id));
     }
     return true;
   },
@@ -1731,23 +1750,28 @@ export const sellerProductService = {
     const currentAuth = db.getAuth();
     const rawSellerId = storedSellerId || currentAuth?.user?.sellerId || currentAuth?.user?.id || currentSeller?.sellerId || currentSeller?.id;
     const sellerId = String(rawSellerId || '');
+    const targetId = String(id).replace(/^sp_/, '').trim();
 
     if (!USE_MOCK_API) {
       try {
         let response;
         try {
-          response = await apiClient.patch(`/api/seller/products/${id}/stock`, { stockQty: Number(stockQty) });
+          response = await apiClient.patch(`/api/seller/products/${targetId}/stock`, { stockQty: Number(stockQty) });
         } catch (e) {
-          response = await apiClient.put(`/api/products/${id}`, {
+          response = await apiClient.put(`/api/seller/products/${targetId}`, {
             stockQty: Number(stockQty),
             stock: Number(stockQty),
             reason,
           });
         }
         const rawData = response.data?.data || response.data;
-        if (rawData) return normalizeSellerProduct(rawData);
+        if (rawData) {
+          try { db.updateSellerStock(sellerId, id, stockQty); } catch (_) {}
+          return normalizeSellerProduct(rawData);
+        }
+        return { id: targetId, stockQty: Number(stockQty), stock: Number(stockQty) };
       } catch (apiError) {
-        // Fallback
+        throw new Error(apiError?.response?.data?.message || apiError?.message || 'Failed to update stock.');
       }
     }
 
@@ -1765,9 +1789,11 @@ export const sellerProductService = {
     const currentAuth = db.getAuth();
     const rawSellerId = storedSellerId || currentAuth?.user?.sellerId || currentAuth?.user?.id || currentSeller?.sellerId || currentSeller?.id;
     const sellerId = String(rawSellerId || '');
+    const targetId = String(id).replace(/^sp_/, '').trim();
 
     const payload = {
       price: Number(priceData.price ?? priceData.sellingPrice),
+      sellingPrice: Number(priceData.sellingPrice ?? priceData.price),
       mrp: Number(priceData.mrp ?? 0),
       bulkPricingTiers: priceData.bulkPricingTiers || [],
     };
@@ -1776,18 +1802,21 @@ export const sellerProductService = {
       try {
         let response;
         try {
-          response = await apiClient.patch(`/api/seller/products/${id}/pricing`, payload);
+          response = await apiClient.patch(`/api/seller/products/${targetId}/pricing`, payload);
         } catch (e) {
-          response = await apiClient.put(`/api/products/${id}`, {
-            price: payload.price,
-            sellingPrice: payload.price,
-            mrp: payload.mrp,
-          });
+          try {
+            response = await apiClient.put(`/api/seller/products/${targetId}`, payload);
+          } catch (e2) {
+            response = await apiClient.put(`/api/products/${targetId}`, payload);
+          }
         }
         const rawData = response.data?.data || response.data;
-        if (rawData) return normalizeSellerProduct(rawData);
+        if (rawData) {
+          try { db.updateSellerPrice(sellerId, id, priceData); } catch (_) {}
+          return normalizeSellerProduct(rawData);
+        }
       } catch (apiError) {
-        // Fallback
+        throw new Error(apiError?.response?.data?.message || apiError?.message || 'Failed to update product pricing.');
       }
     }
 

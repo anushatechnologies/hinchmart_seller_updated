@@ -1,34 +1,94 @@
-import { apiClient, delay, hasValidLiveAuth, canAccessSellerApi } from './apiClient.js';
+import { apiClient, delay, USE_MOCK_API, hasValidLiveAuth, canAccessSellerApi, markSellerApiForbidden } from './apiClient.js';
 import { db } from '../mock/db.js';
+import { orderService } from './order.service.js';
+
+function filterCustomerList(list, params = {}) {
+  let result = Array.isArray(list) ? list : [];
+  if (params.status && params.status !== 'All') {
+    const target = String(params.status).toLowerCase();
+    result = result.filter((c) => String(c.status || 'Active').toLowerCase() === target);
+  }
+  const qRaw = params.search || params.q;
+  if (qRaw && String(qRaw).trim()) {
+    const q = String(qRaw).trim().toLowerCase();
+    result = result.filter(
+      (c) =>
+        (c.name || '').toLowerCase().includes(q) ||
+        (c.company || '').toLowerCase().includes(q) ||
+        (c.email || '').toLowerCase().includes(q) ||
+        (c.phone || '').toLowerCase().includes(q) ||
+        (c.gstin || '').toLowerCase().includes(q) ||
+        (c.city || '').toLowerCase().includes(q)
+    );
+  }
+  return result;
+}
+
+async function deriveCustomersFromOrders() {
+  try {
+    const orders = await orderService.getOrders();
+    const map = new Map();
+    (orders || []).forEach((o, idx) => {
+      const b = o.buyer || {};
+      const key = b.id || b.email || b.phone || b.company || b.name || `buyer_${idx}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          id: b.id || String(key),
+          name: b.name || 'B2B Buyer',
+          company: b.company || b.name || 'Enterprise Client',
+          email: b.email || '',
+          phone: b.phone || '',
+          gstin: b.gstin || '',
+          city: o.deliveryAddress?.city || b.city || '',
+          state: o.deliveryAddress?.state || b.state || '',
+          status: 'Active',
+          totalOrders: 0,
+          totalSpent: 0,
+          lastOrderDate: o.createdAt,
+        });
+      }
+      const entry = map.get(key);
+      entry.totalOrders += 1;
+      entry.totalSpent += Number(o.totalAmount || 0);
+      if (o.createdAt && (!entry.lastOrderDate || new Date(o.createdAt) > new Date(entry.lastOrderDate))) {
+        entry.lastOrderDate = o.createdAt;
+      }
+    });
+    return Array.from(map.values());
+  } catch (_) {
+    return [];
+  }
+}
 
 export const customerService = {
-  // GET /customers
+  // GET /api/customers (guarded) or derived from seller orders in live mode
   async getCustomers(params = {}) {
-    if (hasValidLiveAuth() && canAccessSellerApi('/api/seller/customers')) {
+    if (!USE_MOCK_API && hasValidLiveAuth() && canAccessSellerApi('/api/customers')) {
       try {
-        const response = await apiClient.get('/api/seller/customers', { params });
-        const list = response.data?.data || response.data?.customers || response.data;
+        const resp = await apiClient.get('/api/customers', { params });
+        const raw = resp.data?.data || resp.data?.customers || resp.data;
+        const list = Array.isArray(raw) ? raw : Array.isArray(raw?.content) ? raw.content : null;
         if (Array.isArray(list)) {
+          const filtered = filterCustomerList(list, params);
           return {
-            data: list,
-            total: response.data?.total ?? list.length,
+            data: filtered,
+            total: resp.data?.total ?? filtered.length,
           };
         }
       } catch (e) {
-        // Fallback to /api/customers if /api/seller/customers is not available
-        try {
-          const resp = await apiClient.get('/api/customers', { params });
-          const list = resp.data?.data || resp.data?.customers || resp.data;
-          if (Array.isArray(list)) {
-            return {
-              data: list,
-              total: resp.data?.total ?? list.length,
-            };
-          }
-        } catch (e2) {
-          // Graceful fallback
+        if (e?.response?.status === 403) {
+          markSellerApiForbidden('/api/customers');
         }
       }
+    }
+
+    if (!USE_MOCK_API) {
+      const derived = await deriveCustomersFromOrders();
+      const filtered = filterCustomerList(derived, params);
+      return {
+        data: filtered,
+        total: filtered.length,
+      };
     }
 
     await delay(150);
@@ -39,20 +99,25 @@ export const customerService = {
     };
   },
 
-  // GET /customers/:id
+  // GET /api/customers/:id
   async getCustomerById(id) {
-    if (hasValidLiveAuth()) {
+    if (!USE_MOCK_API && hasValidLiveAuth() && canAccessSellerApi('/api/customers')) {
       try {
-        const resp = await apiClient.get(`/api/seller/customers/${id}`);
+        const resp = await apiClient.get(`/api/customers/${id}`);
         const data = resp.data?.data || resp.data?.customer || resp.data;
         if (data && typeof data === 'object') return data;
       } catch (e) {
-        try {
-          const resp = await apiClient.get(`/api/customers/${id}`);
-          const data = resp.data?.data || resp.data?.customer || resp.data;
-          if (data && typeof data === 'object') return data;
-        } catch (e2) {}
+        if (e?.response?.status === 403) {
+          markSellerApiForbidden('/api/customers');
+        }
       }
+    }
+
+    if (!USE_MOCK_API) {
+      const { data } = await this.getCustomers();
+      const found = (data || []).find((c) => String(c.id) === String(id));
+      if (found) return found;
+      throw new Error(`Customer with ID ${id} not found`);
     }
 
     await delay(100);
@@ -61,40 +126,49 @@ export const customerService = {
     return customer;
   },
 
-  // POST /customers
+  // POST /api/customers
   async createCustomer(customerData) {
-    if (hasValidLiveAuth()) {
+    if (!USE_MOCK_API && hasValidLiveAuth() && canAccessSellerApi('/api/customers')) {
       try {
-        const resp = await apiClient.post('/api/seller/customers', customerData);
+        const resp = await apiClient.post('/api/customers', customerData);
         const data = resp.data?.data || resp.data?.customer || resp.data;
         if (data) return data;
       } catch (e) {
-        try {
-          const resp = await apiClient.post('/api/customers', customerData);
-          const data = resp.data?.data || resp.data?.customer || resp.data;
-          if (data) return data;
-        } catch (e2) {}
+        if (e?.response?.status === 403) {
+          markSellerApiForbidden('/api/customers');
+          throw new Error(
+            e?.response?.data?.message || 'Customer directory creation requires admin permissions on the backend.'
+          );
+        }
+        throw new Error(e?.response?.data?.message || e.message || 'Failed to create customer.');
       }
+    }
+
+    if (!USE_MOCK_API) {
+      throw new Error('Customer directory creation requires backend admin permission (/api/customers is restricted).');
     }
 
     await delay(250);
     return db.createCustomer ? db.createCustomer(customerData) : { id: `cust_${Date.now()}`, ...customerData };
   },
 
-  // PUT /customers/:id
+  // PUT /api/customers/:id
   async updateCustomer(id, updates) {
-    if (hasValidLiveAuth()) {
+    if (!USE_MOCK_API && hasValidLiveAuth() && canAccessSellerApi('/api/customers')) {
       try {
-        const resp = await apiClient.put(`/api/seller/customers/${id}`, updates);
+        const resp = await apiClient.put(`/api/customers/${id}`, updates);
         const data = resp.data?.data || resp.data?.customer || resp.data;
         if (data) return data;
       } catch (e) {
-        try {
-          const resp = await apiClient.put(`/api/customers/${id}`, updates);
-          const data = resp.data?.data || resp.data?.customer || resp.data;
-          if (data) return data;
-        } catch (e2) {}
+        if (e?.response?.status === 403) {
+          markSellerApiForbidden('/api/customers');
+        }
+        throw new Error(e?.response?.data?.message || e.message || 'Failed to update customer.');
       }
+    }
+
+    if (!USE_MOCK_API) {
+      throw new Error('Customer updates require backend admin permission.');
     }
 
     await delay(200);
@@ -103,20 +177,23 @@ export const customerService = {
     return updated;
   },
 
-  // PATCH /customers/:id/status
+  // PATCH /api/customers/:id/status
   async updateCustomerStatus(id, status) {
-    if (hasValidLiveAuth()) {
+    if (!USE_MOCK_API && hasValidLiveAuth() && canAccessSellerApi('/api/customers')) {
       try {
-        const resp = await apiClient.patch(`/api/seller/customers/${id}/status`, { status });
+        const resp = await apiClient.patch(`/api/customers/${id}/status`, { status });
         const data = resp.data?.data || resp.data?.customer || resp.data;
         if (data) return data;
       } catch (e) {
-        try {
-          const resp = await apiClient.patch(`/api/customers/${id}/status`, { status });
-          const data = resp.data?.data || resp.data?.customer || resp.data;
-          if (data) return data;
-        } catch (e2) {}
+        if (e?.response?.status === 403) {
+          markSellerApiForbidden('/api/customers');
+        }
+        throw new Error(e?.response?.data?.message || e.message || 'Failed to update customer status.');
       }
+    }
+
+    if (!USE_MOCK_API) {
+      throw new Error('Customer status updates require backend admin permission.');
     }
 
     await delay(150);
@@ -125,20 +202,11 @@ export const customerService = {
     return updated;
   },
 
-  // GET /customers/search?q=
+  // Client-side filtered lookup avoiding broken /api/customers/search (400) and /api/seller/customers (404)
   async searchCustomers(query = '') {
-    if (hasValidLiveAuth()) {
-      try {
-        const resp = await apiClient.get('/api/seller/customers', { params: { search: query, q: query } });
-        const list = resp.data?.data || resp.data?.customers || resp.data;
-        if (Array.isArray(list)) return list;
-      } catch (e) {
-        try {
-          const resp = await apiClient.get('/api/customers/search', { params: { q: query } });
-          const list = resp.data?.data || resp.data?.customers || resp.data;
-          if (Array.isArray(list)) return list;
-        } catch (e2) {}
-      }
+    if (!USE_MOCK_API) {
+      const { data } = await this.getCustomers({ search: query });
+      return data || [];
     }
 
     await delay(100);

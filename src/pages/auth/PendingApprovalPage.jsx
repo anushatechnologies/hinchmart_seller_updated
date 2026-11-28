@@ -126,8 +126,14 @@ export function PendingApprovalPage() {
             if (role === 'SELLER' || role.includes('SELLER') || onboardingStat === 'VERIFIED' || onboardingStat === 'APPROVED') {
               backendApproved = true;
               if (syncData.accessToken) {
+                localStorage.setItem('hinchmart_seller_token', syncData.accessToken);
                 localStorage.setItem('accessToken', syncData.accessToken);
                 localStorage.setItem('sellerToken', syncData.accessToken);
+                localStorage.setItem('authToken', syncData.accessToken);
+              }
+              if (syncData.sellerId) {
+                localStorage.setItem('sellerId', String(syncData.sellerId));
+                localStorage.setItem('hinchmart_seller_id', String(syncData.sellerId));
               }
             }
           }
@@ -167,7 +173,7 @@ export function PendingApprovalPage() {
       // Strategy C: Probe protected seller API (Spring Boot returns 200 OK once role is ROLE_SELLER)
       if (!backendApproved) {
         try {
-          const probeRes = await apiClient.get('/api/seller/products', { params: { limit: 1 }, timeout: 3500 });
+          const probeRes = await apiClient.get('/api/seller/products', { params: { limit: 1 }, timeout: 8000 });
           if (probeRes.status === 200) {
             backendApproved = true;
           }
@@ -183,6 +189,7 @@ export function PendingApprovalPage() {
           localStorage.setItem('seller_onboarding_status', 'VERIFIED');
           if (activeId && !localStorage.getItem('sellerId')) {
             localStorage.setItem('sellerId', String(activeId));
+            localStorage.setItem('hinchmart_seller_id', String(activeId));
           }
         }
         markSellerApiAllowed();

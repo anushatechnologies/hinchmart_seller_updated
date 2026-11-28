@@ -18,9 +18,7 @@ export const sellerOnboardingService = {
   submitStep1PersonalKyc: async (formData) => {
     let sellerId = null;
     try {
-      const res = await apiClient.post('/api/sellers/onboarding/step1-personal', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const res = await apiClient.post('/api/sellers/onboarding/step1-personal', formData);
       const data = res.data?.data || res.data;
       sellerId = data?.sellerId || data?.id;
       if (sellerId && typeof localStorage !== 'undefined') {
@@ -98,9 +96,7 @@ export const sellerOnboardingService = {
       const formData = new FormData();
       formData.append('documentType', documentType);
       formData.append('file', file);
-      const res = await apiClient.post(`/api/sellers/onboarding/${sId}/documents`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const res = await apiClient.post(`/api/sellers/onboarding/${sId}/documents`, formData);
       return res.data?.data || res.data;
     } catch (err) {
       console.warn('Live onboarding document upload notice (saving locally):', err.response?.data?.message || err.message);

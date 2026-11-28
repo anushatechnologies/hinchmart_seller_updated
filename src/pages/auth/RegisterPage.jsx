@@ -531,11 +531,13 @@ export function RegisterPage() {
           );
           const syncData = syncRes?.data?.data || syncRes?.data;
           if (syncData?.accessToken && typeof localStorage !== 'undefined') {
+            localStorage.setItem('hinchmart_seller_token', syncData.accessToken);
             localStorage.setItem('accessToken', syncData.accessToken);
             localStorage.setItem('sellerToken', syncData.accessToken);
             localStorage.setItem('authToken', syncData.accessToken);
             if (syncData.sellerId) {
               localStorage.setItem('sellerId', String(syncData.sellerId));
+              localStorage.setItem('hinchmart_seller_id', String(syncData.sellerId));
               syncedSellerId = syncData.sellerId;
             }
           }
@@ -803,18 +805,33 @@ export function RegisterPage() {
         const currentUser = auth?.currentUser;
         if (currentUser && typeof currentUser.getIdToken === 'function') {
           const fbToken = await currentUser.getIdToken();
-          const syncRes = await apiClient.post('/api/auth/sync', {
-            firebaseIdToken: fbToken,
-            role: 'SELLER',
-            name: formData.fullName,
-            phone: formData.mobileNumber,
-            email: formData.email,
-          });
+          const syncRes = await apiClient.post(
+            '/api/auth/sync',
+            {
+              firebaseIdToken: fbToken,
+              role: 'SELLER',
+              name: formData.fullName,
+              phone: formData.mobileNumber,
+              email: formData.email,
+            },
+            {
+              headers: { Authorization: `Bearer ${fbToken}` },
+              timeout: 15000,
+            }
+          );
           const syncData = syncRes?.data?.data || syncRes?.data;
           if (syncData?.accessToken && typeof localStorage !== 'undefined') {
+            if (currentUser.uid) {
+              localStorage.setItem('hinchmart_seller_uid', currentUser.uid);
+            }
+            localStorage.setItem('hinchmart_seller_token', syncData.accessToken);
             localStorage.setItem('accessToken', syncData.accessToken);
             localStorage.setItem('sellerToken', syncData.accessToken);
             localStorage.setItem('authToken', syncData.accessToken);
+            if (syncData.sellerId) {
+              localStorage.setItem('hinchmart_seller_id', String(syncData.sellerId));
+              localStorage.setItem('sellerId', String(syncData.sellerId));
+            }
           }
         }
       } catch (tokenSyncErr) {

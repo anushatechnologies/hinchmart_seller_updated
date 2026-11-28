@@ -19,6 +19,14 @@ let activeSyncPromise = null;
  */
 export function getStoredBackendToken() {
   if (typeof localStorage === 'undefined') return null;
+  const activeUid = auth?.currentUser?.uid;
+  const storedUid = localStorage.getItem('hinchmart_seller_uid');
+  if (activeUid && storedUid && activeUid !== storedUid) {
+    ['hinchmart_seller_token', 'accessToken', 'sellerToken', 'authToken', 'token'].forEach((k) =>
+      localStorage.removeItem(k)
+    );
+    return null;
+  }
   const token =
     localStorage.getItem('hinchmart_seller_token') ||
     localStorage.getItem('accessToken') ||
@@ -66,6 +74,9 @@ async function exchangeFirebaseTokenForBackendToken(firebaseToken, profile = {})
     const data = res.data?.data || res.data;
     const accessToken = data?.accessToken || data?.token;
     if (accessToken && typeof localStorage !== 'undefined') {
+      if (auth?.currentUser?.uid) {
+        localStorage.setItem('hinchmart_seller_uid', auth.currentUser.uid);
+      }
       localStorage.setItem('hinchmart_seller_token', accessToken);
       localStorage.setItem('accessToken', accessToken);
       localStorage.setItem('sellerToken', accessToken);
@@ -115,7 +126,7 @@ export async function resolveLiveBackendToken(forceRefresh = false) {
           phone: user?.phoneNumber,
         });
         if (backendToken) return backendToken;
-        return fbToken;
+        return getStoredBackendToken() || null;
       }
 
       return getStoredBackendToken();
@@ -240,11 +251,20 @@ apiClient.interceptors.request.use(
 
     // If uploading FormData, delete Content-Type to let browser set multipart/form-data with boundary
     if (config.data instanceof FormData) {
-      delete config.headers['Content-Type'];
+      if (typeof config.headers?.delete === 'function') {
+        config.headers.delete('Content-Type');
+      }
+      if (config.headers) {
+        delete config.headers['Content-Type'];
+        delete config.headers['content-type'];
+      }
     }
 
     // Retrieve sellerId stored in localStorage (synced from backend) or DB
-    const storedSellerId = typeof localStorage !== 'undefined' ? localStorage.getItem('sellerId') : null;
+    const storedSellerId =
+      typeof localStorage !== 'undefined'
+        ? localStorage.getItem('sellerId') || localStorage.getItem('hinchmart_seller_id')
+        : null;
     const currentSeller = db.getSeller();
     const rawSellerId = storedSellerId || currentSeller?.sellerId || currentSeller?.id || DEFAULT_SELLER_ID;
     let headerSellerId = DEFAULT_SELLER_ID;
@@ -295,7 +315,11 @@ apiClient.interceptors.response.use(
       try {
         const refreshedToken = await resolveLiveBackendToken(true);
         if (refreshedToken) {
-          originalRequest.headers['Authorization'] = `Bearer ${refreshedToken}`;
+          if (typeof originalRequest.headers?.set === 'function') {
+            originalRequest.headers.set('Authorization', `Bearer ${refreshedToken}`);
+          } else if (originalRequest.headers) {
+            originalRequest.headers['Authorization'] = `Bearer ${refreshedToken}`;
+          }
           return apiClient(originalRequest);
         }
       } catch (refreshErr) {

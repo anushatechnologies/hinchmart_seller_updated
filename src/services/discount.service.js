@@ -1,5 +1,4 @@
-import { apiClient, delay, USE_MOCK_API, canAccessSellerApi } from './apiClient.js';
-import { db } from '../mock/db.js';
+import { apiClient, delay, USE_MOCK_API, canAccessSellerApi, markSellerApiForbidden } from './apiClient.js';
 
 /**
  * Journey 9: Discounts & Promos Service
@@ -10,16 +9,6 @@ export const discountService = {
   /**
    * 9.1 Create Seller Discount / Coupon
    * POST /api/seller/discounts
-   * Request Body:
-   * {
-   *   code: string,
-   *   discountType: 'PERCENTAGE' | 'FIXED',
-   *   discountValue: number,
-   *   startDate: string (YYYY-MM-DD),
-   *   endDate: string (YYYY-MM-DD),
-   *   minimumOrderAmount: number,
-   *   maxDiscountAmount: number
-   * }
    */
   async createDiscount(discountData) {
     const payload = {
@@ -33,13 +22,19 @@ export const discountService = {
       ...discountData,
     };
 
-    if (!USE_MOCK_API && canAccessSellerApi('/api/seller/discounts')) {
+    if (!USE_MOCK_API) {
+      if (!canAccessSellerApi('/api/seller/discounts')) {
+        throw new Error('Discount creation is currently restricted for this account.');
+      }
       try {
         const response = await apiClient.post('/api/seller/discounts', payload);
         const data = response.data?.data || response.data;
         if (data) return data;
       } catch (err) {
-        console.warn('POST /api/seller/discounts fallback:', err?.response?.data?.message || err.message);
+        if (err?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/discounts');
+        }
+        throw new Error(err?.response?.data?.message || err?.message || 'Failed to create discount.');
       }
     }
 
@@ -59,12 +54,18 @@ export const discountService = {
    */
   async submitDiscountForReview(discountId) {
     if (!USE_MOCK_API) {
+      if (!canAccessSellerApi('/api/seller/discounts')) {
+        throw new Error('Discount submission is currently restricted for this account.');
+      }
       try {
         const response = await apiClient.patch(`/api/seller/discounts/${discountId}/submit`);
         const data = response.data?.data || response.data;
         if (data) return data;
       } catch (err) {
-        console.warn(`PATCH /api/seller/discounts/${discountId}/submit fallback:`, err?.response?.data?.message || err.message);
+        if (err?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/discounts');
+        }
+        throw new Error(err?.response?.data?.message || err?.message || 'Failed to submit discount for review.');
       }
     }
 
@@ -87,9 +88,15 @@ export const discountService = {
         const list = response.data?.data || response.data;
         if (Array.isArray(list)) return list;
       } catch (err) {
-        console.warn('GET /api/seller/discounts fallback:', err?.message);
+        if (err?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/discounts');
+        } else {
+          console.warn('GET /api/seller/discounts notice:', err?.message);
+        }
       }
     }
+
+    if (!USE_MOCK_API) return [];
 
     await delay(100);
     return [];
@@ -100,13 +107,15 @@ export const discountService = {
    * GET /api/seller/discounts/{id}
    */
   async getDiscountById(id) {
-    if (!USE_MOCK_API && canAccessSellerApi(`/api/seller/discounts/${id}`)) {
+    if (!USE_MOCK_API && canAccessSellerApi('/api/seller/discounts')) {
       try {
         const response = await apiClient.get(`/api/seller/discounts/${id}`);
         const data = response.data?.data || response.data;
         if (data) return data;
       } catch (err) {
-        console.warn(`GET /api/seller/discounts/${id} fallback:`, err?.message);
+        if (err?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/discounts');
+        }
       }
     }
 
@@ -119,13 +128,19 @@ export const discountService = {
    * PUT /api/seller/discounts/{id}
    */
   async updateDiscount(id, discountData) {
-    if (!USE_MOCK_API && canAccessSellerApi(`/api/seller/discounts/${id}`)) {
+    if (!USE_MOCK_API) {
+      if (!canAccessSellerApi('/api/seller/discounts')) {
+        throw new Error('Discount update is currently restricted for this account.');
+      }
       try {
         const response = await apiClient.put(`/api/seller/discounts/${id}`, discountData);
         const data = response.data?.data || response.data;
         if (data) return data;
       } catch (err) {
-        console.warn(`PUT /api/seller/discounts/${id} fallback:`, err?.message);
+        if (err?.response?.status === 403) {
+          markSellerApiForbidden('/api/seller/discounts');
+        }
+        throw new Error(err?.response?.data?.message || err?.message || 'Failed to update discount.');
       }
     }
 
@@ -135,4 +150,3 @@ export const discountService = {
 };
 
 export default discountService;
-

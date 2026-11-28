@@ -148,21 +148,26 @@ export const orderService = {
           if (err1?.response?.status === 403) {
             markSellerApiForbidden('/api/seller/orders');
           }
-          // Fallback to general order endpoint: GET /api/orders?sellerId=...
-          if (canAccessSellerApi('/api/orders')) {
-            try {
-              const response = await apiClient.get('/api/orders', { params: queryParams });
-              const list = extractList(response);
-              if (Array.isArray(list)) {
-                return list.map(normalizeOrder);
-              }
-            } catch (err2) {
-              if (err2?.response?.status === 403) {
-                markSellerApiForbidden('/api/orders');
-              }
-            }
+        }
+      }
+
+      // 2. Fallback to general order endpoint independently: GET /api/orders
+      if (canAccessSellerApi('/api/orders')) {
+        try {
+          const response = await apiClient.get('/api/orders', { params: queryParams });
+          const list = extractList(response);
+          if (Array.isArray(list)) {
+            return list.map(normalizeOrder);
+          }
+        } catch (err2) {
+          if (err2?.response?.status === 403) {
+            markSellerApiForbidden('/api/orders');
           }
         }
+      }
+
+      if (!USE_MOCK_API) {
+        return [];
       }
     }
 
@@ -289,18 +294,45 @@ export const orderService = {
   },
 
   /**
-   * Generate Statutory Commercial Tax Invoice (Idempotent)
+   * Generate / Fetch Statutory Commercial Tax Invoice (Idempotent)
+   * GET /api/orders/{id}/invoice
    */
   async generateInvoice(id) {
-    await delay(250);
+    if (!USE_MOCK_API && id) {
+      try {
+        const response = await apiClient.get(`/api/orders/${id}/invoice`);
+        const invData = response.data?.data || response.data;
+        if (invData && typeof invData === 'object') {
+          let order = null;
+          try {
+            order = await this.getOrderById(id);
+          } catch (_) {}
+          return {
+            order: order ? { ...order, invoice: invData } : { id, invoice: invData },
+            invoice: invData,
+          };
+        }
+      } catch (err) {
+        if (err?.response?.status && err.response.status !== 404 && err.response.status !== 403) {
+          console.warn('GET /api/orders/{id}/invoice notice:', err?.response?.data?.message || err.message);
+        }
+      }
+    }
+
+    await delay(150);
     const result = db.generateOrderInvoice(id);
-    if (!result.order) throw new Error('Failed to generate Commercial Tax Invoice.');
+    if (!result.order) {
+      if (!USE_MOCK_API) {
+        throw new Error('Tax invoice is generated automatically by backend when order is confirmed.');
+      }
+      throw new Error('Failed to generate Commercial Tax Invoice.');
+    }
     return result;
   },
 
   /**
    * Update Order Status with transition validation and timeline recording
-   * PATCH /api/orders/{id}/status
+   * PUT /api/orders/{id}/status or PATCH/PUT /api/seller/orders/{id}/status
    */
   async updateOrderStatus(id, { status, notes, dispatchDetails, podDetails }) {
     const backendStatus = mapToBackendStatus(status);
@@ -322,48 +354,59 @@ export const orderService = {
     };
 
     if (!USE_MOCK_API) {
-      // 1. Dedicated seller endpoint: PATCH /api/seller/orders/{id}/status
-      try {
-        const response = await apiClient.patch(`/api/seller/orders/${id}/status`, payload);
-        const data = response.data?.data || response.data;
-        if (data) {
-          try { db.updateOrderStatus(id, status, notes, dispatchDetails, podDetails); } catch (_) {}
-          return normalizeOrder(data);
-        }
-      } catch (err1) {
-        if (err1.response?.status === 403) {
-          const errMsg = err1.response?.data?.message || 'Access denied: You do not have permission to perform this status update.';
-          throw new Error(errMsg);
-        }
-        // 2. Dedicated seller endpoint: PUT /api/seller/orders/{id}/status
+      let lastForbiddenErr = null;
+
+      if (canAccessSellerApi('/api/seller/orders')) {
         try {
-          const response = await apiClient.put(`/api/seller/orders/${id}/status`, payload);
+          const response = await apiClient.patch(`/api/seller/orders/${id}/status`, payload);
           const data = response.data?.data || response.data;
           if (data) {
             try { db.updateOrderStatus(id, status, notes, dispatchDetails, podDetails); } catch (_) {}
             return normalizeOrder(data);
           }
-        } catch (err2) {
-          if (err2.response?.status === 403) {
-            const errMsg = err2.response?.data?.message || 'Access denied: You do not have permission to perform this status update.';
-            throw new Error(errMsg);
+        } catch (err1) {
+          if (err1?.response?.status === 403) {
+            lastForbiddenErr = err1;
+          } else {
+            try {
+              const response = await apiClient.put(`/api/seller/orders/${id}/status`, payload);
+              const data = response.data?.data || response.data;
+              if (data) {
+                try { db.updateOrderStatus(id, status, notes, dispatchDetails, podDetails); } catch (_) {}
+                return normalizeOrder(data);
+              }
+            } catch (err2) {
+              if (err2?.response?.status === 403) {
+                lastForbiddenErr = err2;
+              }
+            }
           }
-          // 3. Fallback: PATCH /api/orders/{id}/status
-          try {
-            const response = await apiClient.patch(`/api/orders/${id}/status`, payload);
-            const data = response.data?.data || response.data;
-            if (data) {
-              try { db.updateOrderStatus(id, status, notes, dispatchDetails, podDetails); } catch (_) {}
-              return normalizeOrder(data);
-            }
-          } catch (err3) {
-            if (err3.response?.status === 403) {
-              const errMsg = err3.response?.data?.message || 'Access denied: You do not have permission to perform this status update.';
-              throw new Error(errMsg);
-            }
+        }
+      }
+
+      // Live Spring endpoint supports PUT /api/orders/{id}/status (PATCH returns 405)
+      if (canAccessSellerApi('/api/orders')) {
+        try {
+          const response = await apiClient.put(`/api/orders/${id}/status`, payload);
+          const data = response.data?.data || response.data;
+          if (data) {
+            try { db.updateOrderStatus(id, status, notes, dispatchDetails, podDetails); } catch (_) {}
+            return normalizeOrder(data);
+          }
+        } catch (err3) {
+          if (err3?.response?.status === 403) {
+            lastForbiddenErr = err3;
+          } else {
             console.warn('Update order status notice:', err3?.response?.data?.message || err3?.message);
           }
         }
+      }
+
+      if (lastForbiddenErr) {
+        const errMsg =
+          lastForbiddenErr.response?.data?.message ||
+          'Access denied: You do not have permission to perform this status update.';
+        throw new Error(errMsg);
       }
     }
     await delay(250);
@@ -382,8 +425,43 @@ export const orderService = {
 
   /**
    * Get all commercial invoices for the dedicated Invoices module
+   * GET /api/invoices
    */
   async getInvoices() {
+    if (!USE_MOCK_API) {
+      try {
+        const response = await apiClient.get('/api/invoices');
+        const raw = response.data?.data ?? response.data;
+        const list = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw?.content)
+          ? raw.content
+          : Array.isArray(raw?.invoices)
+          ? raw.invoices
+          : null;
+        if (Array.isArray(list) && list.length > 0) {
+          return list;
+        }
+      } catch (err) {
+        console.warn('GET /api/invoices notice:', err?.response?.data?.message || err.message);
+      }
+
+      const orders = await this.getOrders();
+      return (orders || [])
+        .filter((o) => o && o.invoice && o.invoice.invoiceNumber)
+        .map((o) => ({
+          ...o.invoice,
+          orderId: o.id,
+          orderNumber: o.orderNumber,
+          buyer: o.buyer,
+          deliveryAddress: o.deliveryAddress,
+          items: o.items,
+          paymentStatus: o.paymentStatus,
+          orderStatus: o.orderStatus,
+          createdAt: o.createdAt,
+        }));
+    }
+
     await delay(150);
     const orders = db.getOrders();
     const invoices = orders

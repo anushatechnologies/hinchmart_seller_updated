@@ -21,9 +21,22 @@ export function BulkPricingPage() {
   const [appliedResults, setAppliedResults] = useState(null);
 
   // Calculate live preview of affected items
+  const selectedCategoryObj = categories.find((c) => String(c.id) === String(selectedCategory));
+  const selectedCategoryName = selectedCategoryObj?.name || selectedCategory;
+
   const affectedProducts = pricingList.filter((p) => {
-    if (selectedCategory !== 'All' && p.category !== selectedCategory) return false;
-    if (selectedBrand !== 'All' && p.brand !== selectedBrand) return false;
+    if (selectedCategory !== 'All') {
+      const catMatch =
+        String(p.categoryId) === String(selectedCategory) ||
+        String(p.category || '').toLowerCase() === String(selectedCategoryName || '').toLowerCase();
+      if (!catMatch) return false;
+    }
+    if (selectedBrand !== 'All') {
+      const brandMatch =
+        String(p.brandId) === String(selectedBrand) ||
+        String(p.brand || '').toLowerCase() === String(selectedBrand || '').toLowerCase();
+      if (!brandMatch) return false;
+    }
     return true;
   });
 
